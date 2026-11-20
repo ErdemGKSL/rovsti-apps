@@ -1,7 +1,6 @@
 package dev.rosty.core.ops
 
 import dev.rosty.core.Outcome
-import dev.rosty.core.map
 import dev.rosty.core.Rust
 import dev.rosty.core.RustError
 import dev.rosty.core.RustEvent
@@ -9,6 +8,7 @@ import dev.rosty.core.RustEvents
 import dev.rosty.core.RustHandle
 import dev.rosty.core.RustNative
 import dev.rosty.core.RustThreading
+import dev.rosty.core.map
 import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.people.PeopleEntry
 import dev.rosty.core.model.people.PeopleSyncBundleAnswer
@@ -258,7 +258,13 @@ class WaGateway internal constructor(
         group: String,
         action: dev.rosty.core.model.wa.GroupActionKind,
     ): Outcome<dev.rosty.core.model.wa.GroupActionDone> =
-        guarded { ops.groupAction(id, dev.rosty.core.model.wa.GroupAction(group, action)) }
+        guarded {
+            ops.groupAction(
+                id,
+                dev.rosty.core.model.wa
+                    .GroupAction(group, action),
+            )
+        }
 
     /** Creates a group (E6-WA R6). */
     suspend fun createGroup(req: dev.rosty.core.model.wa.CreateGroup): Outcome<dev.rosty.core.model.wa.GroupCreated> =
@@ -269,7 +275,8 @@ class WaGateway internal constructor(
         guarded { ops.groupInvitePreview(id, code) }
 
     /** Joins a group with an invite link (E6-WA R6). */
-    suspend fun joinGroup(code: String): Outcome<dev.rosty.core.model.wa.GroupJoined> = guarded { ops.groupJoin(id, code) }
+    suspend fun joinGroup(code: String): Outcome<dev.rosty.core.model.wa.GroupJoined> =
+        guarded { ops.groupJoin(id, code) }
 
     /** The pending join requests of a group (E6-WA R6). */
     suspend fun joinRequests(jid: String): Outcome<List<dev.rosty.core.model.wa.JoinRequest>> =

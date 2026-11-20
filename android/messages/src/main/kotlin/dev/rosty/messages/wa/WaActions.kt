@@ -178,15 +178,27 @@ class NativeWaActionRules(
     override suspend fun groupNotice(
         note: dev.rosty.core.model.wa.GroupNote,
         own: List<String>,
-    ) = ops.groupNotice(dev.rosty.core.model.wa.GroupNoticeRequest(note, own)).getOrNull()
+    ) = ops
+        .groupNotice(
+            dev.rosty.core.model.wa
+                .GroupNoticeRequest(note, own),
+        ).getOrNull()
 
     override suspend fun inviteFind(text: String) =
-        ops.inviteFind(dev.rosty.core.model.wa.InviteFindRequest(text)).getOrNull()
+        ops
+            .inviteFind(
+                dev.rosty.core.model.wa
+                    .InviteFindRequest(text),
+            ).getOrNull()
 
     override suspend fun groupResults(
         kind: String,
         results: List<dev.rosty.core.model.wa.ParticipantResult>,
-    ) = ops.groupResults(dev.rosty.core.model.wa.GroupResultsRequest(kind, results)).getOrNull()
+    ) = ops
+        .groupResults(
+            dev.rosty.core.model.wa
+                .GroupResultsRequest(kind, results),
+        ).getOrNull()
 }
 
 /** The host a link card names (`www.` and the port left out), for a card or chip that has no host from the page. */

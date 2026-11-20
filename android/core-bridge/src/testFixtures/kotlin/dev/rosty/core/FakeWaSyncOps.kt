@@ -1481,7 +1481,8 @@ class FakeWaSyncOps(
         }
 
     /** E6-WA R6: the groups kept by [groupStore], by jid. */
-    val groups = mutableMapOf<String, Pair<dev.rosty.core.model.wa.StoredGroup, List<dev.rosty.core.model.wa.GroupMember>>>()
+    val groups =
+        mutableMapOf<String, Pair<dev.rosty.core.model.wa.StoredGroup, List<dev.rosty.core.model.wa.GroupMember>>>()
 
     override suspend fun groupStore(req: dev.rosty.core.model.wa.WaSyncGroupStoreRequest) =
         synchronized(lock) {
@@ -1491,7 +1492,10 @@ class FakeWaSyncOps(
             if (info.left && info.participants.isEmpty() && kept != null) {
                 val (group, members) = kept
                 groups[info.jid] = group.copy(settings = group.settings.copy(left = true)) to members
-                return@synchronized ok(dev.rosty.core.model.wa.WaSyncGroupStored(HANDLE, 0))
+                return@synchronized ok(
+                    dev.rosty.core.model.wa
+                        .WaSyncGroupStored(HANDLE, 0),
+                )
             }
             val group =
                 dev.rosty.core.model.wa.StoredGroup(
@@ -1525,19 +1529,26 @@ class FakeWaSyncOps(
                     )
                 }
             groups[info.jid] = group to members
-            ok(dev.rosty.core.model.wa.WaSyncGroupStored(HANDLE, members.size))
+            ok(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupStored(HANDLE, members.size),
+            )
         }
 
     override suspend fun groupRead(req: dev.rosty.core.model.wa.WaSyncGroupReadRequest) =
         synchronized(lock) {
             val (group, members) = groups[req.jid] ?: (null to emptyList())
+
             fun mine(m: dev.rosty.core.model.wa.GroupMember) = req.own.any { it == m.jid || it == m.alt }
             val me = members.firstOrNull(::mine)?.role?.takeIf { group?.settings?.left != true }
-            val settings = group?.settings ?: dev.rosty.core.model.wa.GroupSettings()
+            val settings =
+                group?.settings ?: dev.rosty.core.model.wa
+                    .GroupSettings()
             val admin = me != null && me != "member"
             val abilities =
                 if (me == null) {
-                    dev.rosty.core.model.wa.GroupAbilities()
+                    dev.rosty.core.model.wa
+                        .GroupAbilities()
                 } else {
                     dev.rosty.core.model.wa.GroupAbilities(
                         send = admin || !settings.announce,
@@ -1563,7 +1574,11 @@ class FakeWaSyncOps(
                             { it.jid },
                         ),
                     ).filter { m ->
-                        val q = req.query?.trim()?.lowercase().orEmpty()
+                        val q =
+                            req.query
+                                ?.trim()
+                                ?.lowercase()
+                                .orEmpty()
                         q.isEmpty() || m.name?.lowercase()?.contains(q) == true || m.jid.contains(q)
                     }
             ok(

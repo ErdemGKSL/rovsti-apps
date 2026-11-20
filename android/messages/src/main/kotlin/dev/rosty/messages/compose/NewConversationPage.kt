@@ -119,7 +119,11 @@ fun NewConversationPage(
             }
         }
     }
-    val groups = route.share == null && container.wa.linkState.collectAsState().value is dev.rosty.wa.WaLinkState.Connected
+    val groups =
+        route.share == null &&
+            container.wa.linkState
+                .collectAsState()
+                .value is dev.rosty.wa.WaLinkState.Connected
     NewConversationScreen(
         state,
         field,

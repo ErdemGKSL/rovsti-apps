@@ -245,7 +245,9 @@ class WaGroupModel(
                 total = page?.total ?: members.size,
                 community =
                     group?.communityKind?.let {
-                        words.community(communityName ?: subgroups.firstOrNull { s -> s.announcement }?.subject ?: subject)
+                        words.community(
+                            communityName ?: subgroups.firstOrNull { s -> s.announcement }?.subject ?: subject,
+                        )
                     },
                 subgroups =
                     subgroups
@@ -260,7 +262,14 @@ class WaGroupModel(
         own: List<String>,
     ): GroupMemberUi {
         val me = own.any { it == member.jid || it == member.alt }
-        val name = if (me) words.string(dev.rosty.messages.R.string.wa_group_you) else sources.name(member.jid, member.name)
+        val name =
+            if (me) {
+                words.string(
+                    dev.rosty.messages.R.string.wa_group_you,
+                )
+            } else {
+                sources.name(member.jid, member.name)
+            }
         val number = WaIds.number(member.jid) ?: member.alt?.let(WaIds::number)
         val readable = number?.let { sources.readable(it) }
         return GroupMemberUi(
@@ -319,7 +328,11 @@ class WaGroupModel(
                     jid = problem.jid,
                     name = sources.name(problem.jid, null),
                     why = words.outcome(problem),
-                    invite = results.firstOrNull { it.jid == problem.jid }?.invite?.takeIf { problem.jid in summary.invites },
+                    invite =
+                        results.firstOrNull { it.jid == problem.jid }?.invite?.takeIf {
+                            problem.jid in
+                                summary.invites
+                        },
                 )
             }
         effectChannel.send(

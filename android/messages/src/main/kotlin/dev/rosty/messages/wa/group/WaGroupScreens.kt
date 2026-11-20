@@ -547,13 +547,13 @@ fun GroupPickerContent(
             GlassTextField(
                 it,
                 stringResource(R.string.wa_group_subject_hint),
-                Modifier.fillMaxWidth().testTag(GroupTags.Subject),
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(GroupTags.Subject),
             )
         }
         GlassTextField(
             field,
             stringResource(R.string.wa_group_add_hint),
-            Modifier.fillMaxWidth().testTag(GroupTags.PickerField),
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(GroupTags.PickerField),
         )
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             options.forEachIndexed { index, option ->
@@ -588,7 +588,13 @@ fun GroupPickerContent(
             enabled = enabled,
             style = CapsuleStyle.Filled,
             fillWidth = true,
-            modifier = Modifier.padding(bottom = Spacing.l).testTag(GroupTags.PickerDone),
+            modifier =
+                Modifier
+                    .padding(
+                        start = Spacing.gutter,
+                        end = Spacing.gutter,
+                        bottom = Spacing.l,
+                    ).testTag(GroupTags.PickerDone),
         )
     }
 }
@@ -602,7 +608,10 @@ fun GroupTextContent(
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth().padding(bottom = Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
+    Column(
+        modifier.fillMaxWidth().padding(start = Spacing.gutter, end = Spacing.gutter, bottom = Spacing.l),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
         GlassTextField(field, hint, Modifier.fillMaxWidth(), maxLines = lines)
         CapsuleButton(
             stringResource(R.string.wa_group_save),
@@ -635,7 +644,10 @@ fun JoinPreviewContent(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier.fillMaxWidth().padding(bottom = Spacing.l).testTag(GroupTags.Join),
+        modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.gutter, end = Spacing.gutter, bottom = Spacing.l)
+            .testTag(GroupTags.Join),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
@@ -726,7 +738,8 @@ fun GroupRequestsContent(
                         },
                         actions =
                             persistentListOf(
-                                dev.rosty.design.list.CustomAction(reject) { onAnswer(row, false) },
+                                dev.rosty.design.list
+                                    .CustomAction(reject) { onAnswer(row, false) },
                             ),
                         onLongClick = { onAnswer(row, false) },
                     )

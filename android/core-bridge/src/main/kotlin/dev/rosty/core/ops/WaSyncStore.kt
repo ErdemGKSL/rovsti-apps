@@ -417,7 +417,12 @@ class WaSyncStore internal constructor(
         group: GroupInfo,
         nowMs: Long,
     ): Outcome<dev.rosty.core.model.wa.WaSyncGroupStored> =
-        live { ops.groupStore(dev.rosty.core.model.wa.WaSyncGroupStoreRequest(id, nowMs, group)) }
+        live {
+            ops.groupStore(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupStoreRequest(id, nowMs, group),
+            )
+        }
 
     /**
      * A page of the group [jid]: its stored metadata, [limit] members from [offset] (me first, admins, then by name)
@@ -430,7 +435,12 @@ class WaSyncStore internal constructor(
         offset: Int = 0,
         limit: Int = GROUP_PAGE,
     ): Outcome<dev.rosty.core.model.wa.WaSyncGroupPage> =
-        live { ops.groupRead(dev.rosty.core.model.wa.WaSyncGroupReadRequest(id, jid, own, query, offset, limit)) }
+        live {
+            ops.groupRead(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupReadRequest(id, jid, own, query, offset, limit),
+            )
+        }
 
     // ---- the gateway process, the linked account, history progress, unlink
 

@@ -660,11 +660,17 @@ class WaThreadViewModel(
     /** E6-WA R6: the text of a group's notice line, through Rust's template and the name rule. */
     private suspend fun groupNoticeText(system: dev.rosty.core.model.wa.SystemNote): String {
         val own = sources.ownIds()
-        val notice = sources.rules?.groupNotice(system.groupNote(), own) ?: return words.groupNotice(
-            dev.rosty.core.model.wa.GroupNotice("other", dev.rosty.core.model.wa.NoticeActor("nobody")),
-            null,
-            emptyList(),
-        )
+        val notice =
+            sources.rules?.groupNotice(system.groupNote(), own) ?: return words.groupNotice(
+                dev.rosty.core.model.wa
+                    .GroupNotice(
+                        "other",
+                        dev.rosty.core.model.wa
+                            .NoticeActor("nobody"),
+                    ),
+                null,
+                emptyList(),
+            )
         val actor = notice.actor.jid?.let { senderOf(it, null) }
         val targets = notice.targets.map { if (it.me) words.youInNotice else senderOf(it.jid, null) }
         return words.groupNotice(notice, actor, targets)

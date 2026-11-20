@@ -76,7 +76,9 @@ fun realGroupSources(container: MessagesContainer): GroupSources =
         store = { container.waOffline.groupStore(it) },
         observe = { container.waOffline.observe(groups = listOf(it)) },
         name = { jid, push -> container.names.sender(jid, push) },
-        readable = { number -> withContext(Dispatchers.Default) { PhoneNumbers.forReading(number, container.homeRegion) } },
+        readable = { number ->
+            withContext(Dispatchers.Default) { PhoneNumbers.forReading(number, container.homeRegion) }
+        },
         rules = container.waActionRules,
         ownIds = { ownIdsOf(container) },
         day = { ms -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(ms)) },
@@ -116,7 +118,15 @@ fun WaGroupInfoPage(
     val overlays = LocalOverlay.current
     val scope = rememberCoroutineScope()
     val search = rememberTextFieldState()
-    LaunchedEffect(model) { snapshotFlow { search.text.toString() }.collect { if (it != model.state.value.query) model.search(it) } }
+    LaunchedEffect(model) {
+        snapshotFlow { search.text.toString() }.collect {
+            if (it !=
+                model.state.value.query
+            ) {
+                model.search(it)
+            }
+        }
+    }
     LaunchedEffect(model) {
         model.effects.collect { effect ->
             when (effect) {
@@ -151,7 +161,9 @@ fun WaGroupInfoPage(
         remember(model, overlays, res) {
             GroupInfoActions(
                 onBack = onBack,
-                onMember = { member -> scope.launch { overlays.presentMember(res, container, model, member, navigator) } },
+                onMember = { member ->
+                    scope.launch { overlays.presentMember(res, container, model, member, navigator) }
+                },
                 onSetting = model::setSetting,
                 onLink = { model.inviteLink(reset = false) },
                 onRequests = { overlays.presentRequests(res, model) },
@@ -164,13 +176,20 @@ fun WaGroupInfoPage(
                     ) { jids, _ -> model.members("add", jids) }
                 },
                 onEditSubject = {
-                    overlays.presentText(res, R.string.wa_group_edit_subject, model.state.value.subject, 1, model::setSubject)
+                    overlays.presentText(
+                        res,
+                        R.string.wa_group_edit_subject,
+                        model.state.value.subject,
+                        1,
+                        model::setSubject,
+                    )
                 },
                 onEditDescription = {
                     overlays.presentText(
                         res,
                         R.string.wa_group_edit_description,
-                        model.state.value.description.orEmpty(),
+                        model.state.value.description
+                            .orEmpty(),
                         DESCRIPTION_EDIT_LINES,
                         model::setDescription,
                     )
@@ -185,7 +204,10 @@ fun WaGroupInfoPage(
                                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                                         )
                                     },
-                                    ActionSheetAction(res.getString(R.string.wa_group_remove_picture), destructive = true) {
+                                    ActionSheetAction(
+                                        res.getString(R.string.wa_group_remove_picture),
+                                        destructive = true,
+                                    ) {
                                         model.setPicture(null)
                                     },
                                 ),
@@ -212,6 +234,7 @@ private suspend fun OverlayController.presentMember(
 ) {
     val state = model.state.value
     val myRole = state.myRoleKey
+
     suspend fun can(action: String): Boolean {
         val role = myRole ?: return false
         if (!state.abilities.manage) return false
@@ -219,12 +242,21 @@ private suspend fun OverlayController.presentMember(
         return (answer as? Outcome.Ok)?.value?.allowed == true
     }
     val items = ArrayList<ActionSheetAction>()
-    items += ActionSheetAction(res.getString(R.string.wa_group_message_member)) { navigator.push(MessagesRoute.WaThread(member.jid)) }
+    items +=
+        ActionSheetAction(res.getString(R.string.wa_group_message_member)) {
+            navigator.push(MessagesRoute.WaThread(member.jid))
+        }
     if (can("promote")) {
-        items += ActionSheetAction(res.getString(R.string.wa_group_make_admin)) { model.members("promote", listOf(member.jid)) }
+        items +=
+            ActionSheetAction(
+                res.getString(R.string.wa_group_make_admin),
+            ) { model.members("promote", listOf(member.jid)) }
     }
     if (can("demote")) {
-        items += ActionSheetAction(res.getString(R.string.wa_group_dismiss_admin)) { model.members("demote", listOf(member.jid)) }
+        items +=
+            ActionSheetAction(
+                res.getString(R.string.wa_group_dismiss_admin),
+            ) { model.members("demote", listOf(member.jid)) }
     }
     if (can("remove")) {
         items +=
@@ -373,7 +405,13 @@ fun OverlayController.presentPicker(
                 state.options
                     .mapNotNull { option ->
                         val e164 = PhoneNumbers.e164(option.number, container.homeRegion) ?: return@mapNotNull null
-                        PickOption(option.key, option.title, option.detail, e164.removePrefix("+") + "@s.whatsapp.net", option.photoUri)
+                        PickOption(
+                            option.key,
+                            option.title,
+                            option.detail,
+                            e164.removePrefix("+") + "@s.whatsapp.net",
+                            option.photoUri,
+                        )
                     }.toImmutableList()
             val named = subject?.text?.isNotBlank() ?: true
             GroupPickerContent(
@@ -403,7 +441,9 @@ fun OverlayController.presentNewGroup(
     navigator: TabNavigator<MessagesRoute>,
 ) {
     val controller = this
-    presentPicker(res, container, button = { n -> res.getString(R.string.wa_group_create, n) }, withSubject = true) { jids, subject ->
+    presentPicker(res, container, button = { n ->
+        res.getString(R.string.wa_group_create, n)
+    }, withSubject = true) { jids, subject ->
         scope.launch {
             when (val made = container.waRemote.createGroup(CreateGroup(subject, jids))) {
                 is Outcome.Ok -> navigator.push(MessagesRoute.WaGroupInfo(made.value.jid))
@@ -431,16 +471,26 @@ fun OverlayController.presentJoin(
             LaunchedEffect(code) {
                 preview =
                     when (val got = container.waRemote.invitePreview(code)) {
-                        is Outcome.Ok ->
+                        is Outcome.Ok -> {
                             JoinPreviewUi(
                                 jid = got.value.jid,
                                 subject = got.value.subject,
-                                size = got.value.size?.let { res.getQuantityString(R.plurals.wa_group_member_count, it, it) },
+                                size =
+                                    got.value.size?.let {
+                                        res.getQuantityString(
+                                            R.plurals.wa_group_member_count,
+                                            it,
+                                            it,
+                                        )
+                                    },
                                 description = got.value.description,
                                 approval = got.value.approval,
                             )
+                        }
 
-                        is Outcome.Err -> JoinPreviewUi(invalid = true)
+                        is Outcome.Err -> {
+                            JoinPreviewUi(invalid = true)
+                        }
                     }
             }
             JoinPreviewContent(preview, onJoin = {
@@ -480,7 +530,11 @@ fun OverlayController.presentJoinWithLink(
             val scope = rememberCoroutineScope()
             GroupTextContent(field, res.getString(R.string.wa_group_paste_link), 2, onSave = {
                 scope.launch {
-                    val code = container.waActionRules.inviteFind(field.text.toString())?.let { it.code ?: it.found?.code }
+                    val code =
+                        container.waActionRules.inviteFind(field.text.toString())?.let {
+                            it.code
+                                ?: it.found?.code
+                        }
                     controller.dismissAll()
                     if (code == null) {
                         controller.showToast(res.getString(R.string.wa_group_link_invalid))
@@ -501,7 +555,11 @@ private suspend fun jpegOf(
     withContext(Dispatchers.IO) {
         runCatching {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
-            val bitmap = ImageDecoder.decodeBitmap(source) { decoder, _, _ -> decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE }
+            val bitmap =
+                ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                    decoder.allocator =
+                        ImageDecoder.ALLOCATOR_SOFTWARE
+                }
             val side = minOf(bitmap.width, bitmap.height)
             val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
             val scaled = Bitmap.createScaledBitmap(square, GroupMetrics.PICTURE_PX, GroupMetrics.PICTURE_PX, true)

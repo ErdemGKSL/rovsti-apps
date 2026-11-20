@@ -140,7 +140,11 @@ class WaGroupModelTest {
             actionAnswer = {
                 Outcome.Ok(
                     GroupActionDone(
-                        listOf(ParticipantResult(DEN), ParticipantResult(EGE, "403", invite), ParticipantResult(BEN, "409")),
+                        listOf(
+                            ParticipantResult(DEN),
+                            ParticipantResult(EGE, "403", invite),
+                            ParticipantResult(BEN, "409"),
+                        ),
                     ),
                 )
             }
@@ -207,7 +211,11 @@ class WaGroupModelTest {
                 family(meAdmin = true).copy(
                     participants =
                         (0 until 250).map { n ->
-                            Participant("1000000${"%05d".format(n + 100)}@s.whatsapp.net", false, name = "Üye %03d".format(n))
+                            Participant(
+                                "1000000${"%05d".format(n + 100)}@s.whatsapp.net",
+                                false,
+                                name = "Üye %03d".format(n),
+                            )
                         } + Participant(ME, true, role = "admin"),
                     size = 251,
                 )

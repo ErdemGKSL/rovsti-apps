@@ -213,7 +213,9 @@ interface WaSyncOps {
     ): Outcome<dev.rosty.core.model.wa.WaSyncGroupStored>
 
     /** A page of a group's members with my role and what I may do (E6-WA R6). */
-    suspend fun groupRead(req: dev.rosty.core.model.wa.WaSyncGroupReadRequest): Outcome<dev.rosty.core.model.wa.WaSyncGroupPage>
+    suspend fun groupRead(
+        req: dev.rosty.core.model.wa.WaSyncGroupReadRequest,
+    ): Outcome<dev.rosty.core.model.wa.WaSyncGroupPage>
 
     /** Takes in the gateway's epoch, account epoch, own ids and history progress. */
     suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted>

@@ -163,7 +163,10 @@ class ResourceWaWords(
 
     override val leftGroup: String get() = res.getString(R.string.wa_group_left_notice)
 
-    private val groupWords by lazy { dev.rosty.messages.wa.group.GroupWords(res) }
+    private val groupWords by lazy {
+        dev.rosty.messages.wa.group
+            .GroupWords(res)
+    }
 
     override fun groupNotice(
         notice: dev.rosty.core.model.wa.GroupNotice,
@@ -589,7 +592,14 @@ fun WaThreadPage(
                         }
                 },
                 onOpenLink = { url ->
-                    if (isInviteLink(url)) overlays.presentJoin(res, container, url, navigator) else openLink(context, url)
+                    if (isInviteLink(
+                            url,
+                        )
+                    ) {
+                        overlays.presentJoin(res, container, url, navigator)
+                    } else {
+                        openLink(context, url)
+                    }
                 },
                 onRemoveAttachment = model::removeAttachment,
                 attachMenu = attachMenu,
@@ -639,8 +649,13 @@ fun WaThreadPage(
 
 /** A `chat.whatsapp.com` group invite (Rust's `wa.invite_find` reads the code when the sheet opens). */
 internal fun isInviteLink(url: String): Boolean =
-    runCatching { android.net.Uri.parse(url.trim()).host?.lowercase()?.removePrefix("www.") == "chat.whatsapp.com" }
-        .getOrDefault(false)
+    runCatching {
+        android.net.Uri
+            .parse(url.trim())
+            .host
+            ?.lowercase()
+            ?.removePrefix("www.") == "chat.whatsapp.com"
+    }.getOrDefault(false)
 
 /** Opens a link of a card in the app that shows it. */
 private fun openLink(

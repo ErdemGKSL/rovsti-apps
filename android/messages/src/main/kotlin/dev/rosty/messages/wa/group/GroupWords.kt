@@ -54,75 +54,122 @@ class GroupWords(
                 else -> res.getString(nobody)
             }
         return when (notice.template) {
-            "added" ->
+            "added" -> {
                 when {
                     me -> res.getString(R.string.wa_gn_added_you, whom)
                     by != null && onlyMe -> res.getString(R.string.wa_gn_added_me_by, by)
                     by != null -> res.getString(R.string.wa_gn_added_by, by, whom)
                     else -> res.getString(R.string.wa_gn_added, whom)
                 }
+            }
 
-            "removed" ->
+            "removed" -> {
                 when {
                     me -> res.getString(R.string.wa_gn_removed_you, whom)
                     by != null && onlyMe -> res.getString(R.string.wa_gn_removed_me_by, by)
                     by != null -> res.getString(R.string.wa_gn_removed_by, by, whom)
                     else -> res.getString(R.string.wa_gn_removed, whom)
                 }
+            }
 
-            "left" -> if (me) res.getString(R.string.wa_gn_left_you) else res.getString(R.string.wa_gn_left, by ?: whom)
+            "left" -> {
+                if (me) res.getString(R.string.wa_gn_left_you) else res.getString(R.string.wa_gn_left, by ?: whom)
+            }
 
-            "joined" -> if (me) res.getString(R.string.wa_gn_joined_you) else res.getString(R.string.wa_gn_joined, by ?: whom)
+            "joined" -> {
+                if (me) {
+                    res.getString(R.string.wa_gn_joined_you)
+                } else {
+                    res.getString(
+                        R.string.wa_gn_joined,
+                        by ?: whom,
+                    )
+                }
+            }
 
-            "promoted" -> if (onlyMe) res.getString(R.string.wa_gn_promoted_me) else res.getString(R.string.wa_gn_promoted, whom)
+            "promoted" -> {
+                if (onlyMe) res.getString(R.string.wa_gn_promoted_me) else res.getString(R.string.wa_gn_promoted, whom)
+            }
 
-            "demoted" -> if (onlyMe) res.getString(R.string.wa_gn_demoted_me) else res.getString(R.string.wa_gn_demoted, whom)
+            "demoted" -> {
+                if (onlyMe) res.getString(R.string.wa_gn_demoted_me) else res.getString(R.string.wa_gn_demoted, whom)
+            }
 
-            "number_changed" -> res.getString(R.string.wa_gn_number, whom.ifEmpty { by.orEmpty() })
+            "number_changed" -> {
+                res.getString(R.string.wa_gn_number, whom.ifEmpty { by.orEmpty() })
+            }
 
-            "subject" ->
+            "subject" -> {
                 when {
                     me -> res.getString(R.string.wa_gn_subject_you, value)
                     by != null -> res.getString(R.string.wa_gn_subject_by, by, value)
                     else -> res.getString(R.string.wa_gn_subject, value)
                 }
+            }
 
-            "description" ->
+            "description" -> {
                 three(R.string.wa_gn_description_you, R.string.wa_gn_description_by, R.string.wa_gn_description)
+            }
 
-            "description_removed" ->
+            "description_removed" -> {
                 three(
                     R.string.wa_gn_description_removed_you,
                     R.string.wa_gn_description_removed_by,
                     R.string.wa_gn_description_removed,
                 )
+            }
 
-            "picture" -> three(R.string.wa_gn_picture_you, R.string.wa_gn_picture_by, R.string.wa_gn_picture)
+            "picture" -> {
+                three(R.string.wa_gn_picture_you, R.string.wa_gn_picture_by, R.string.wa_gn_picture)
+            }
 
-            "picture_removed" ->
-                three(R.string.wa_gn_picture_removed_you, R.string.wa_gn_picture_removed_by, R.string.wa_gn_picture_removed)
+            "picture_removed" -> {
+                three(
+                    R.string.wa_gn_picture_removed_you,
+                    R.string.wa_gn_picture_removed_by,
+                    R.string.wa_gn_picture_removed,
+                )
+            }
 
-            "announce_on" -> three(R.string.wa_gn_announce_on_you, R.string.wa_gn_announce_on_by, R.string.wa_gn_announce_on)
+            "announce_on" -> {
+                three(R.string.wa_gn_announce_on_you, R.string.wa_gn_announce_on_by, R.string.wa_gn_announce_on)
+            }
 
-            "announce_off" ->
+            "announce_off" -> {
                 three(R.string.wa_gn_announce_off_you, R.string.wa_gn_announce_off_by, R.string.wa_gn_announce_off)
+            }
 
-            "locked_on" -> three(R.string.wa_gn_locked_on_you, R.string.wa_gn_locked_on_by, R.string.wa_gn_locked_on)
+            "locked_on" -> {
+                three(R.string.wa_gn_locked_on_you, R.string.wa_gn_locked_on_by, R.string.wa_gn_locked_on)
+            }
 
-            "locked_off" -> three(R.string.wa_gn_locked_off_you, R.string.wa_gn_locked_off_by, R.string.wa_gn_locked_off)
+            "locked_off" -> {
+                three(R.string.wa_gn_locked_off_you, R.string.wa_gn_locked_off_by, R.string.wa_gn_locked_off)
+            }
 
-            "approval_on" -> three(R.string.wa_gn_approval_on_you, R.string.wa_gn_approval_on_by, R.string.wa_gn_approval_on)
+            "approval_on" -> {
+                three(R.string.wa_gn_approval_on_you, R.string.wa_gn_approval_on_by, R.string.wa_gn_approval_on)
+            }
 
-            "approval_off" ->
+            "approval_off" -> {
                 three(R.string.wa_gn_approval_off_you, R.string.wa_gn_approval_off_by, R.string.wa_gn_approval_off)
+            }
 
-            "link_reset" -> three(R.string.wa_gn_link_reset_you, R.string.wa_gn_link_reset_by, R.string.wa_gn_link_reset)
+            "link_reset" -> {
+                three(R.string.wa_gn_link_reset_you, R.string.wa_gn_link_reset_by, R.string.wa_gn_link_reset)
+            }
 
-            "created" -> three(R.string.wa_gn_created_you, R.string.wa_gn_created_by, R.string.wa_gn_created)
+            "created" -> {
+                three(R.string.wa_gn_created_you, R.string.wa_gn_created_by, R.string.wa_gn_created)
+            }
 
-            "deleted" -> res.getString(R.string.wa_gn_deleted)
+            "deleted" -> {
+                res.getString(R.string.wa_gn_deleted)
+            }
 
-            else -> res.getString(R.string.wa_gn_other)
+            else -> {
+                res.getString(R.string.wa_gn_other)
+            }
         }
     }
 
@@ -139,16 +186,38 @@ class GroupWords(
     /** What happened to one person of a bulk action. */
     fun outcome(view: ResultView): String =
         when (view.outcome) {
-            "invite_instead" -> res.getString(R.string.wa_group_outcome_invite)
-            "privacy" -> res.getString(R.string.wa_group_outcome_privacy)
-            "not_on_whatsapp" -> res.getString(R.string.wa_group_outcome_not_on_whatsapp)
-            "already" -> res.getString(R.string.wa_group_outcome_already)
-            "full" -> res.getString(R.string.wa_group_outcome_full)
-            "left_recently" -> res.getString(R.string.wa_group_outcome_left_recently)
-            "not_allowed" -> res.getString(R.string.wa_group_outcome_not_allowed)
-            else ->
+            "invite_instead" -> {
+                res.getString(R.string.wa_group_outcome_invite)
+            }
+
+            "privacy" -> {
+                res.getString(R.string.wa_group_outcome_privacy)
+            }
+
+            "not_on_whatsapp" -> {
+                res.getString(R.string.wa_group_outcome_not_on_whatsapp)
+            }
+
+            "already" -> {
+                res.getString(R.string.wa_group_outcome_already)
+            }
+
+            "full" -> {
+                res.getString(R.string.wa_group_outcome_full)
+            }
+
+            "left_recently" -> {
+                res.getString(R.string.wa_group_outcome_left_recently)
+            }
+
+            "not_allowed" -> {
+                res.getString(R.string.wa_group_outcome_not_allowed)
+            }
+
+            else -> {
                 view.code?.let { res.getString(R.string.wa_group_outcome_failed, it) }
                     ?: res.getString(R.string.wa_group_outcome_failed_plain)
+            }
         }
 
     fun memberCount(count: Int): String = res.getQuantityString(R.plurals.wa_group_member_count, count, count)

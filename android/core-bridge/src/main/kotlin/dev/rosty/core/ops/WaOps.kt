@@ -665,7 +665,11 @@ interface WaOps {
     }
 }
 
-private fun <T> unsupported(op: String): Outcome<T> = Outcome.Err(dev.rosty.core.RustError.Unsupported(op))
+private fun <T> unsupported(op: String): Outcome<T> =
+    Outcome.Err(
+        dev.rosty.core.RustError
+            .Unsupported(op),
+    )
 
 /** [WaOps] over a [RustCore]; the real core runs every call on `RustDispatcher`. */
 class NativeWaOps(
@@ -1112,7 +1116,8 @@ class NativeWaOps(
     ) = gateway(
         "wa.group_invite_preview",
         handle,
-        dev.rosty.core.model.wa.InviteCodeBody(code),
+        dev.rosty.core.model.wa
+            .InviteCodeBody(code),
         dev.rosty.core.model.wa.InviteCodeBody
             .serializer(),
         dev.rosty.core.model.wa.InvitePreview
@@ -1125,7 +1130,8 @@ class NativeWaOps(
     ) = gateway(
         "wa.group_join",
         handle,
-        dev.rosty.core.model.wa.InviteCodeBody(code),
+        dev.rosty.core.model.wa
+            .InviteCodeBody(code),
         dev.rosty.core.model.wa.InviteCodeBody
             .serializer(),
         dev.rosty.core.model.wa.GroupJoined

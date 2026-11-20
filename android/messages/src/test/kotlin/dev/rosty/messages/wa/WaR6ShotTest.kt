@@ -181,7 +181,12 @@ class WaR6ShotTest : ShotTest() {
     @Test fun aGroupILeft() =
         snap(
             "wa-r6-info-left",
-            content = { Info(it, memberView.copy(left = true, myRole = null, myRoleKey = null, abilities = GroupAbilities())) },
+            content = {
+                Info(
+                    it,
+                    memberView.copy(left = true, myRole = null, myRoleKey = null, abilities = GroupAbilities()),
+                )
+            },
         )
 
     private val picks =
@@ -219,7 +224,10 @@ class WaR6ShotTest : ShotTest() {
 
     @Test fun theAddMembersSheet() = snap("wa-r6-add-members", content = { Shell(it) }, after = { it.picker(null) })
 
-    @Test fun theNewGroupFlow() = snap("wa-r6-new-group", content = { Shell(it) }, after = { it.picker("Pazar kahvaltısı") })
+    @Test fun theNewGroupFlow() =
+        snap("wa-r6-new-group", content = {
+            Shell(it)
+        }, after = { it.picker("Pazar kahvaltısı") })
 
     @Test fun whoAnAddDidNotReach() =
         snap("wa-r6-add-results", content = { Shell(it) }, after = {
@@ -394,7 +402,12 @@ class WaR6ShotTest : ShotTest() {
                     listState = rememberLazyListState(),
                     actions =
                         remember {
-                            ConversationActions(onBack = {}, onSend = {}, onLoadOlder = {}, menuFor = { persistentListOf() })
+                            ConversationActions(
+                                onBack = {},
+                                onSend = {},
+                                onLoadOlder = {},
+                                menuFor = { persistentListOf() },
+                            )
                         },
                     sendLabel = stringResource(R.string.conversation_send),
                     olderLabel = stringResource(R.string.conversation_load_earlier),

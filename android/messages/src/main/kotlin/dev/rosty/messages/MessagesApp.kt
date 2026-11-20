@@ -124,7 +124,10 @@ fun MessagesApp(
             WaVaultGated(container) { WaThreadPage(container, route, navigator, pop) }
         }
         entry<MessagesRoute.WaGroupInfo> { route ->
-            WaVaultGated(container) { dev.rosty.messages.wa.group.WaGroupInfoPage(container, route, navigator, pop) }
+            WaVaultGated(container) {
+                dev.rosty.messages.wa.group
+                    .WaGroupInfoPage(container, route, navigator, pop)
+            }
         }
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
         entry<MessagesRoute.Starred> { StarredEntry(container, navigator) }

@@ -59,6 +59,7 @@ import java.io.File
 fun rememberWaAttachMenu(
     model: WaThreadViewModel,
     overlays: OverlayController,
+    rich: dev.rosty.messages.wa.rich.RichHost? = null,
 ): ImmutableList<MenuItem> {
     val context = LocalContext.current
     val res = LocalResources.current
@@ -72,7 +73,7 @@ fun rememberWaAttachMenu(
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
             model.pick(uris.map { it.toString() })
         }
-    return remember(model, overlays, media, document, res) {
+    return remember(model, overlays, media, document, res, rich) {
         persistentListOf(
             MenuItem.Action(res.getString(R.string.wa_attach_photo), RostyIcons.Photo) {
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -83,6 +84,13 @@ fun rememberWaAttachMenu(
             MenuItem.Action(res.getString(R.string.wa_attach_document), RostyIcons.Document) {
                 document.launch(ANY_FILE)
             },
+            // E6-WA R5: a place, a contact, a poll.
+            MenuItem.Action(res.getString(R.string.wa_attach_location), RostyIcons.Map) { rich?.sendPlace?.invoke() },
+            MenuItem.Action(
+                res.getString(R.string.wa_attach_contact),
+                RostyIcons.Person,
+            ) { rich?.pickContact?.invoke() },
+            MenuItem.Action(res.getString(R.string.wa_attach_poll), RostyIcons.BarChart) { rich?.createPoll?.invoke() },
             MenuItem.Separator,
             MenuItem.Action(res.getString(R.string.wa_attach_paste), RostyIcons.Copy) {
                 val uri = clipboardPicture(context)

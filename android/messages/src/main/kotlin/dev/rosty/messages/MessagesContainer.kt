@@ -152,6 +152,16 @@ open class MessagesContainer(
         dev.rosty.messages.wa
             .PrefsLinkPreviewSetting(context)
 
+    /**
+     * E6-WA R5: the map pictures of place cards, from tiles kept in memory only; null where no tile source can open
+     * (screenshots, tests).
+     */
+    val placeMaps: dev.rosty.messages.wa.rich.PlaceMaps? by lazy { createPlaceMaps() }
+
+    protected open fun createPlaceMaps(): dev.rosty.messages.wa.rich.PlaceMaps? =
+        dev.rosty.messages.wa.rich
+            .PlaceMaps(staticMap = { waActionRules.staticMap(it) })
+
     protected open fun createWaActionRules(): dev.rosty.messages.wa.WaActionRules =
         dev.rosty.messages.wa
             .NativeWaActionRules(waOps)

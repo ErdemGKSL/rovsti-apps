@@ -198,6 +198,27 @@ are due with their media rows and answers `{removed, files, chats, next_ms?}` (d
 (through every id of the person), `link_preview?`, `system?` (`{type: "disappearing", seconds, by?}`, a line, not a message) and
 `expires_at?`; chats carry `ephemeral_s?`. A message deleted for me here or on another device of mine is left out of the thread, the
 starred list and the gallery; an edit or delete for everyone that comes before its message is applied when the message arrives.
+
+Rich content and presence (E6-WA R5, `rosty_core::wa_rich`). Gateway: `wa.send_rich {handle, chat, quoted_id?, content}` answers `Sent`;
+`content` is `{type: "poll", question, options, multiple?}`, `{type: "location", latitude, longitude, name?, address?}` or `{type:
+"contacts", contacts: [{display_name, vcard}]}`, checked first (an invalid poll, coordinates out of range or no card are `invalid` without a
+request; an older gateway: `not_found`). `wa.poll_vote {handle, chat, message_id, options}` (empty `options` takes my vote back) and
+`wa.unsubscribe_presence {handle, jid}` answer `{}`. Meta gains `poll? {question, options: [{name, voters}], selectable, my_votes}` (voter
+`me` is my vote), `contacts` (every card) and `kept`; `location` gains `url?`, `comment?`. Pure: `wa.poll_check {question, options,
+multiple?}` answers `{draft?, problems: [{kind: no_question | question_too_long | too_few_options | too_many_options | option_too_long |
+duplicate, index?}], min_options, max_options}`; `wa.poll_view {poll, own}` answers `{question, multiple, voters, voted, options: [{name,
+count, percent, mine, leading, voters}]}`; `wa.vcard_parse {vcard}` answers `{cards: [{name?, numbers: [{number, label?, wa_jid?}], emails,
+org?}]}` (several cards, folded lines, escapes, a card with no number); `wa.vcard_build {name, numbers}` answers `{vcard}` (vCard 3.0, a
+`waid` on international numbers; no name is `invalid`); `wa.place_view {latitude, longitude, name?, address?, live?}` answers `{title?,
+subtitle?, coords, geo_uri, live}` (no title: "Shared location"; coordinates out of range are `invalid`); `wa.static_map {latitude,
+longitude, zoom?, width, height, tile_px}` answers `{zoom, tile_px, tiles: [{z, x, y, left, top}], pin_x, pin_y}` (the point in the middle,
+wrapped at the date line); `wa.presence_view {group?, presence? {available, last_seen_ms?}, typing: [{jid, kind: typing | recording,
+at_ms}], now_ms}` answers `{kind: none | online | last_seen | typing | recording | busy, ...}` (a typing state ends after 25 s; a group
+shows only who types or records; a hidden last seen is `none`). Store: `wa_sync.outbox_enqueue` takes `{kind: "send_rich", content,
+quoted_id?}` (shown at once as a poll, place or card row) and `{kind: "poll_vote", message_id, options}` (my choice shows at once; a refused
+vote shows the one before; a choice the poll does not allow, or a message that is no poll, is refused). Rows carry `poll?`, `contacts` and
+`kept` (a kept row has no `expires_at`); `kind` gains `poll`. Tiles: `tiles.open` takes `memory: true` (tiles kept in memory only, no
+file written; Messages' place cards).
 People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key, home_cc?}` (a number in any spelling, phone JID, LID JID or bare LID; a number is read by the one number rule, `caller_id::e164_of`, so a national spelling needs the home calling code `home_cc` and `people.upsert` takes `home_cc?` for its `number`s too; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
 
 People sync v2 (`rosty_app_core::people_sync`, plan `_bmad-output/plans/people-sync-v2.md`): `people.sync_begin
@@ -528,7 +549,11 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.subscribe_presence` | - | wa | op | wa.subscribe_presence |
 | `(wa) wa.forward` | - | wa | op | wa.forward |
 | `(wa) wa.message_receipts` | - | wa | op | wa.message_receipts |
+| `(wa) wa.send_rich` | - | wa | op | wa.send_rich |
+| `(wa) wa.poll_vote` | - | wa | op | wa.poll_vote |
+| `(wa) wa.unsubscribe_presence` | - | wa | op | wa.unsubscribe_presence |
 | `rosty_core::wa_actions` | messages | wa | op | wa.mention_query, wa.mention_encode, wa.link_find, wa.link_parse, wa.receipt_sections |
+| `rosty_core::wa_rich` | messages | wa | op | wa.poll_check, wa.poll_view, wa.vcard_parse, wa.vcard_build, wa.place_view, wa.static_map, wa.presence_view |
 | `rosty_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rosty_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
 | `rosty_app_core::contacts::whatsapp` | contacts | wa | op | wa.target, contacts.wa_marks, contacts.wa_card, contacts.wa_profile_lines |

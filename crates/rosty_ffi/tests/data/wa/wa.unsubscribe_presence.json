@@ -1,0 +1,8 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/presence/unsubscribe",
+  "body": {"jid": "100000000011@s.whatsapp.net"}
+ },
+ "status": 204
+}

@@ -2,6 +2,7 @@ package dev.rosty.stops.map
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import dev.rosty.map.TileRasterizer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest

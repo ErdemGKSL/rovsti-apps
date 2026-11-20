@@ -42,6 +42,7 @@ mod live;
 mod people;
 mod pure;
 mod rest;
+mod rich;
 mod settings;
 
 pub use live::{PULL_WAIT, audio_pull, audio_pull_within, audio_push};
@@ -65,6 +66,7 @@ pub(super) const TABLES: &[&[OpSpec]] = &[
     live::OPS,
     people::OPS,
     actions::OPS,
+    rich::OPS,
 ];
 
 /// Media and pictures up to this size travel inside the JSON answer; larger ones become a file.

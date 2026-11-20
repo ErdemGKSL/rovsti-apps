@@ -67,6 +67,8 @@ mod model;
 mod outbox;
 pub mod plan;
 mod query;
+#[cfg(test)]
+mod rich_tests;
 mod schema;
 mod store;
 #[cfg(test)]

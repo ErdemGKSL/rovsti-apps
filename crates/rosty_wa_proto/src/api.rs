@@ -31,6 +31,8 @@ pub mod routes {
     pub const MESSAGE_MEDIA: &str = "/v1/messages/{message_id}/media";
     pub const PRESENCE: &str = "/v1/presence";
     pub const PRESENCE_SUBSCRIBE: &str = "/v1/presence/subscribe";
+    /// E6-WA R5.
+    pub const PRESENCE_UNSUBSCRIBE: &str = "/v1/presence/unsubscribe";
     pub const CHAT_STATE: &str = "/v1/chatstate";
     pub const CONTACTS_LOOKUP: &str = "/v1/contacts/lookup";
     pub const GROUPS: &str = "/v1/groups";
@@ -50,6 +52,10 @@ pub mod routes {
     /// Forward a stored message to another chat (E6-WA R4). Older gateways
     /// answer 404.
     pub const FORWARD: &str = "/v1/messages/forward";
+    /// E6-WA R5: a poll, a place or contact cards.
+    pub const RICH: &str = "/v1/messages/rich";
+    /// E6-WA R5.
+    pub const POLL_VOTE: &str = "/v1/polls/vote";
     /// Who got, read or played one of my messages, with times, `?chat=`
     /// (E6-WA R4). Older gateways answer 404.
     pub const MESSAGE_RECEIPTS: &str = "/v1/messages/{message_id}/receipts";

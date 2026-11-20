@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/rich",
+  "body": {
+   "chat": "100000000011@s.whatsapp.net",
+   "content": {"type": "location", "latitude": 41.0258, "longitude": 28.9744, "name": "Galata"}
+  }
+ },
+ "status": 200,
+ "body": {"message_id": "3EB0L1", "timestamp_ms": 1790000000457}
+}

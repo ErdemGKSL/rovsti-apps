@@ -482,6 +482,12 @@ pub(super) struct JidRef {
     jid: String,
 }
 
+impl JidRef {
+    pub(super) fn jid(&self) -> &str {
+        &self.jid
+    }
+}
+
 #[derive(Deserialize)]
 pub(super) struct Jids {
     jids: Vec<String>,

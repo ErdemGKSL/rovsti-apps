@@ -88,7 +88,11 @@ crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
   and tested in `rosty_geo::tiles` (slippy math, MVT decoding, styles for colorful and
   eclipse, clipping, the LRU index and fetch queue); the I/O is in `rosty_tiles` (ureq over
   rustls, disk cache). It is the only network traffic besides the WhatsApp gateway.
-  The server is a setting (`tile_url` in `stops-prefs.json`).
+  The server is a setting (`tile_url` in `stops-prefs.json`). The Android painting lives in the
+  shared library module `:map` (`TileRasterizer`, and `StaticMapPainter` for a small fixed map
+  around a point). Messages uses `:map` for the map cards of shared places (E6-WA R5). It fetches
+  from the default server, and its tile source is opened with `memory: true`, so nothing is
+  written to disk: a tile cache would show which places were shared in chats.
 - **Storage.** Each app keeps its files in its no-backup directory
   (`rosty_ui::storage::data_dir`). Nothing leaves the device except WhatsApp traffic
   to the user's own gateway, map tile requests to the chosen tile server, and what the

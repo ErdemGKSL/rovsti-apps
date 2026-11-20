@@ -455,6 +455,8 @@ fn rename_sender(action: &mut Action, from: &str, into: &str) -> bool {
         | Action::Edit { .. }
         | Action::Forward { .. }
         | Action::DeleteForMe { .. }
+        | Action::SendRich { .. }
+        | Action::PollVote { .. }
         | Action::Star { .. } => return false,
     };
     if sender.as_deref() != Some(from) {

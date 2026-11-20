@@ -486,8 +486,9 @@ class InCallViewModelTest {
     private fun waHarness(
         wa: Boolean = true,
         call: dev.rosty.core.model.phone.WireCall = liveCall(contactId = null, canHold = false),
+        presence: dev.rosty.wa.presence.WaPresencePorts? = null,
     ): InCallHarness {
-        val h = InCallHarness(liveSnapshot(call, endpoints = emptyList()))
+        val h = InCallHarness(liveSnapshot(call, endpoints = emptyList()), presencePorts = presence)
         if (wa) {
             val jid = "905559990000@s.whatsapp.net"
             h.source.setWhatsApp(
@@ -522,6 +523,92 @@ class InCallViewModelTest {
         assertFalse(wa.keypad || wa.hold || wa.addCall)
         assertEquals("the sentence is the core's", "Not available on WhatsApp calls", wa.note)
         assertNull("a cellular call has no WhatsApp facts", waHarness(wa = false).ui.whatsapp)
+    }
+
+    // ---- Presence of a ringing WhatsApp call (E6-WA R5) -----------------------------------------------------------
+
+    /** Records the gateway calls; the line is online while the last presence said available, else last seen. */
+    private class PresencePorts : dev.rosty.wa.presence.WaPresencePorts {
+        val asked = ArrayList<String>()
+
+        override suspend fun subscribe(jid: String): dev.rosty.core.Outcome<Unit> {
+            asked += "subscribe $jid"
+            return dev.rosty.core.Outcome
+                .Ok(Unit)
+        }
+
+        override suspend fun unsubscribe(jid: String): dev.rosty.core.Outcome<Unit> {
+            asked += "unsubscribe $jid"
+            return dev.rosty.core.Outcome
+                .Ok(Unit)
+        }
+
+        override suspend fun available(available: Boolean): dev.rosty.core.Outcome<Unit> {
+            asked += "available $available"
+            return dev.rosty.core.Outcome
+                .Ok(Unit)
+        }
+
+        override suspend fun view(
+            req: dev.rosty.core.model.wa.PresenceViewRequest,
+        ): dev.rosty.core.Outcome<dev.rosty.core.model.wa.HeaderPresence> {
+            val seen = req.presence
+            return dev.rosty.core.Outcome.Ok(
+                when {
+                    seen?.available == true -> {
+                        dev.rosty.core.model.wa
+                            .HeaderPresence(dev.rosty.core.model.wa.HeaderPresenceKind.Online)
+                    }
+
+                    seen?.lastSeenMs != null -> {
+                        dev.rosty.core.model.wa.HeaderPresence(
+                            dev.rosty.core.model.wa.HeaderPresenceKind.LastSeen,
+                            atMs = seen.lastSeenMs,
+                        )
+                    }
+
+                    else -> {
+                        dev.rosty.core.model.wa.HeaderPresence.NONE
+                    }
+                },
+            )
+        }
+    }
+
+    @Test fun aRingingWhatsAppCallWatchesThePersonAndLeavesOnceAnswered() {
+        val ports = PresencePorts()
+        val dialing = liveCall(state = WireCallState.Dialing, contactId = null, canHold = false, connectedAgoS = -1)
+        val h = waHarness(call = dialing, presence = ports)
+        val jid = "905559990000@s.whatsapp.net"
+        assertEquals(listOf("available true", "subscribe $jid"), ports.asked)
+        assertEquals("nothing known yet", dev.rosty.core.model.wa.HeaderPresenceKind.None, h.ui.waPresence.kind)
+
+        h.waEvents.tryEmit(
+            dev.rosty.core.model.wa.GatewayEvent
+                .Presence(jid, available = true),
+        )
+        assertEquals(dev.rosty.core.model.wa.HeaderPresenceKind.Online, h.ui.waPresence.kind)
+        h.waEvents.tryEmit(
+            dev.rosty.core.model.wa.GatewayEvent
+                .Presence("100000000052@s.whatsapp.net", available = false, lastSeenMs = NOW),
+        )
+        assertEquals("someone else's presence changes nothing", "Online", h.ui.waPresence.kind.name)
+
+        h.source.set(liveSnapshot(dialing.copy(state = WireCallState.Active), endpoints = emptyList()))
+        assertEquals(listOf("available true", "subscribe $jid", "unsubscribe $jid", "available false"), ports.asked)
+        assertEquals("an answered call shows no presence", "None", h.ui.waPresence.kind.name)
+        h.waEvents.tryEmit(
+            dev.rosty.core.model.wa.GatewayEvent
+                .Presence(jid, available = true),
+        )
+        assertEquals("events after leaving are ignored", "None", h.ui.waPresence.kind.name)
+    }
+
+    @Test fun anIncomingOrCellularCallIsNeverWatched() {
+        val ports = PresencePorts()
+        waHarness(call = liveCall(state = WireCallState.Ringing, incoming = true, contactId = null), presence = ports)
+        waHarness(wa = false, call = liveCall(state = WireCallState.Dialing), presence = ports)
+        assertEquals(emptyList<String>(), ports.asked)
     }
 
     @Test fun aTapOnADimmedControlSaysWhyAndDoesNothingElse() {

@@ -20,8 +20,10 @@ data class TilesOpenRequest(
     @SerialName("server_url") @EncodeDefault(NEVER) val serverUrl: String? = null,
     /** Cap of the per-server cache in bytes; null is 128 MB. */
     @SerialName("cache_cap") @EncodeDefault(NEVER) val cacheCap: Long? = null,
-    /** The cache root; null is `<cache dir>/tiles`. */
+    /** The cache root; null is `<cache dir>/tiles`. Ignored with [memory]. */
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** Keep the tiles in memory only, no file written (E6-WA R5: Messages' place cards). */
+    @EncodeDefault(NEVER) val memory: Boolean = false,
 )
 
 @Serializable

@@ -677,4 +677,40 @@
     <string name="wa_chats_title">Sohbetler</string>
     <string name="wa_link_previews">Bağlantı Önizlemeleri</string>
     <string name="wa_link_previews_note">Bir bağlantı yazdığınızda önizleme kartını göstermek için sayfayı bu telefon açar. Geçit hiçbir zaman açmaz. Kapalıyken hiçbir şey indirilmez.</string>
+    <!-- E6-WA R5: anketler, konumlar, kişi kartları, çevrimiçi durumu -->
+    <string name="wa_attach_location">Konum</string>
+    <string name="wa_attach_contact">Kişi</string>
+    <string name="wa_attach_poll">Anket</string>
+    <string name="wa_presence_online">çevrimiçi</string>
+    <string name="wa_presence_last_seen_today">son görülme bugün %1$s</string>
+    <string name="wa_presence_last_seen_yesterday">son görülme dün %1$s</string>
+    <string name="wa_presence_last_seen_day">son görülme %1$s %2$s</string>
+    <string name="wa_poll_single">Birini seçin</string>
+    <string name="wa_poll_multiple_hint">Bir veya daha fazlasını seçin</string>
+    <string name="wa_poll_no_votes">Henüz oy yok</string>
+    <plurals name="wa_poll_votes">
+        <item quantity="one">%d oy</item>
+        <item quantity="other">%d oy</item>
+    </plurals>
+    <string name="wa_place_shared">Paylaşılan konum</string>
+    <string name="wa_place_live">Canlı konum</string>
+    <string name="wa_place_open_in">Şurada aç…</string>
+    <string name="wa_place_send_title">Konum Gönder</string>
+    <string name="wa_place_mine">Konumum</string>
+    <string name="wa_place_accuracy">%1$d m hassasiyetle</string>
+    <string name="wa_place_send">Gönder</string>
+    <string name="wa_place_finding">Konumunuz bulunuyor…</string>
+    <string name="wa_place_no_fix">Konumunuz bulunamadı</string>
+    <string name="wa_place_no_permission">Konumunuzu göndermek için konum izni gerekir</string>
+    <string name="wa_contact_message">Mesaj</string>
+    <string name="wa_contact_add">Kişilere Ekle</string>
+    <string name="wa_contact_no_number">Telefon numarası yok</string>
+    <string name="wa_contact_not_sent">Kişi gönderilemedi</string>
+    <string name="wa_poll_new">Yeni Anket</string>
+    <string name="wa_poll_question">Soru</string>
+    <string name="wa_poll_question_hint">Bir soru sorun</string>
+    <string name="wa_poll_options">Seçenekler</string>
+    <string name="wa_poll_option_hint">Seçenek %1$d</string>
+    <string name="wa_poll_multiple">Birden fazla yanıta izin ver</string>
+    <string name="wa_poll_send">Gönder</string>
 </resources>

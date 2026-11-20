@@ -178,6 +178,16 @@ class FakeWaRemote : WaRemote {
     val thumbnailCalls = mutableListOf<String>()
     val mediaCalls = mutableListOf<String>()
 
+    /** E6-WA R5: every presence call, as `subscribe <jid>`, `unsubscribe <jid>`, `available <bool>`. */
+    val presenceCalls = mutableListOf<String>()
+
+    override suspend fun subscribePresence(jid: String): Outcome<Unit> = gate { presenceCalls += "subscribe $jid" }
+
+    override suspend fun unsubscribePresence(jid: String): Outcome<Unit> = gate { presenceCalls += "unsubscribe $jid" }
+
+    override suspend fun setAvailable(available: Boolean): Outcome<Unit> =
+        gate { presenceCalls += "available $available" }
+
     override suspend fun thumbnail(messageId: String): Outcome<BytesAnswer> {
         thumbnailCalls += messageId
         return thumbnails[messageId]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)

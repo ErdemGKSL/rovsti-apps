@@ -693,4 +693,40 @@
     <string name="wa_chats_title">Chats</string>
     <string name="wa_link_previews">Link Previews</string>
     <string name="wa_link_previews_note">When you type a link, this phone opens the page to show its preview card. The gateway never does. Off: nothing is fetched.</string>
+    <!-- E6-WA R5: polls, places, contact cards, presence -->
+    <string name="wa_attach_location">Location</string>
+    <string name="wa_attach_contact">Contact</string>
+    <string name="wa_attach_poll">Poll</string>
+    <string name="wa_presence_online">online</string>
+    <string name="wa_presence_last_seen_today">last seen today at %1$s</string>
+    <string name="wa_presence_last_seen_yesterday">last seen yesterday at %1$s</string>
+    <string name="wa_presence_last_seen_day">last seen %1$s at %2$s</string>
+    <string name="wa_poll_single">Select one</string>
+    <string name="wa_poll_multiple_hint">Select one or more</string>
+    <string name="wa_poll_no_votes">No votes yet</string>
+    <plurals name="wa_poll_votes">
+        <item quantity="one">%d vote</item>
+        <item quantity="other">%d votes</item>
+    </plurals>
+    <string name="wa_place_shared">Shared location</string>
+    <string name="wa_place_live">Live location</string>
+    <string name="wa_place_open_in">Open in…</string>
+    <string name="wa_place_send_title">Send Location</string>
+    <string name="wa_place_mine">My location</string>
+    <string name="wa_place_accuracy">Accurate to %1$d m</string>
+    <string name="wa_place_send">Send</string>
+    <string name="wa_place_finding">Finding your location…</string>
+    <string name="wa_place_no_fix">Your location could not be found</string>
+    <string name="wa_place_no_permission">Location access is needed to send your location</string>
+    <string name="wa_contact_message">Message</string>
+    <string name="wa_contact_add">Add to Contacts</string>
+    <string name="wa_contact_no_number">No phone number</string>
+    <string name="wa_contact_not_sent">The contact could not be sent</string>
+    <string name="wa_poll_new">New Poll</string>
+    <string name="wa_poll_question">Question</string>
+    <string name="wa_poll_question_hint">Ask a question</string>
+    <string name="wa_poll_options">Options</string>
+    <string name="wa_poll_option_hint">Option %1$d</string>
+    <string name="wa_poll_multiple">Allow multiple answers</string>
+    <string name="wa_poll_send">Send</string>
 </resources>

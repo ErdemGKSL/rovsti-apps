@@ -1110,6 +1110,100 @@ impl WaRuntime {
     }
 }
 
+impl WaRuntime {
+    /// Sends a poll, a place or contact cards (E6-WA R5) with the chat's timer and a reply context, and stores it.
+    /// The poll protobuf is the library's (`polls().create`), built here so the timer can go along.
+    async fn send_rich_inner(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::SendRich,
+    ) -> Result<Sent, DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
+        let to = convert::parse_jid(&req.chat)?;
+        let out = Outgoing::new(&client, &resolver, &to).await;
+        let mut quoted = None;
+        let context = match req.quoted_id.as_deref().filter(|id| !id.is_empty()) {
+            Some(quoted_id) => {
+                let message = sink.find_message(&out.chat, quoted_id).await;
+                let wire = sink.wire_ids(&out.chat, quoted_id).await;
+                let own_jid = out.own_jid.as_deref();
+                quoted = Some(quoted_meta(quoted_id, message.as_ref(), own_jid));
+                Some(quote_context(
+                    &out.chat,
+                    quoted_id,
+                    message.as_ref(),
+                    &wire,
+                    own_jid,
+                ))
+            }
+            None => None,
+        };
+        let (message, secret) = super::rich::rich_message(&req.content, context)?;
+        let mut extras = convert::extras(&message);
+        extras.secret = secret.or(extras.secret);
+        extras.meta.quoted = quoted.or(extras.meta.quoted);
+        extras.meta.status = Some(DeliveryStatus::Sent);
+        let timer = sink.chat_timer(&out.chat).await;
+        extras.meta.expires_s = timer;
+        let result = client
+            .send_message_with_options(to, message, send_options(timer))
+            .await
+            .map_err(failed)?;
+        let timestamp_ms = now_ms();
+        sink.emit_full(
+            out.message(
+                result.message_id.clone(),
+                timestamp_ms,
+                MessageBody::Unsupported,
+            ),
+            extras,
+        )
+        .await;
+        Ok(Sent {
+            message_id: result.message_id,
+            timestamp_ms,
+        })
+    }
+
+    /// My vote in a stored poll (E6-WA R5): sent with the poll's secret under the author's id as the poll
+    /// arrived, then counted.
+    async fn poll_vote_inner(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::PollVote,
+    ) -> Result<(), DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let source = sink
+            .poll_source(&req.chat, &req.message_id)
+            .await
+            .ok_or_else(|| DriverError::BadRequest("no such poll".into()))?;
+        let secret = source
+            .secret
+            .clone()
+            .ok_or_else(|| DriverError::BadRequest("the poll's secret is not kept".into()))?;
+        let device = client.persistence_manager().get_device_snapshot();
+        let creator = if source.from_me {
+            device.pn.as_ref().map(|jid| jid.to_non_ad().to_string())
+        } else if convert::is_group(&req.chat) {
+            source.wire_sender.clone().or(source.sender.clone())
+        } else {
+            source.wire_chat.clone().or(Some(req.chat.clone()))
+        }
+        .ok_or_else(|| DriverError::Failed("the poll's author is unknown".into()))?;
+        let creator = convert::parse_jid(&creator)?;
+        let chat = convert::parse_jid(source.wire_chat.as_deref().unwrap_or(&req.chat))?;
+        client
+            .polls()
+            .vote(chat, &req.message_id, &creator, &secret, &req.options)
+            .await
+            .map_err(failed)?;
+        sink.my_poll_vote(&req.chat, &req.message_id, req.options)
+            .await;
+        Ok(())
+    }
+}
+
 /// A delivered, read or played receipt. One-to-one: the ticks of my messages
 /// move. Group: the receipt is one member's, and the ticks move once every
 /// other member got that far. `ReadSelf`: I read their messages on another
@@ -1851,6 +1945,37 @@ impl WaDriver for WaRuntime {
     ) -> BoxFuture<'_, Result<Sent, DriverError>> {
         let instance = instance.clone();
         Box::pin(async move { self.forward_inner(&instance, req).await })
+    }
+
+    fn send_rich(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::SendRich,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.send_rich_inner(&instance, req).await })
+    }
+
+    fn poll_vote(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::PollVote,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.poll_vote_inner(&instance, req).await })
+    }
+
+    fn unsubscribe_presence(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let jid = convert::parse_jid(&jid)?;
+            let (client, _) = self.client_of(&instance)?;
+            client.presence().unsubscribe(&jid).await.map_err(failed)
+        })
     }
 
     fn mark_played(

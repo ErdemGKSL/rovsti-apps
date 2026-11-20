@@ -29,6 +29,7 @@ import dev.rosty.core.model.wa.EditMessage
 import dev.rosty.core.model.wa.ForwardMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.HeaderPresence
 import dev.rosty.core.model.wa.IdBody
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.IdentityMappingsBody
@@ -60,7 +61,15 @@ import dev.rosty.core.model.wa.MessagesBody
 import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.PictureBody
 import dev.rosty.core.model.wa.PlaceCallBody
+import dev.rosty.core.model.wa.PlaceView
+import dev.rosty.core.model.wa.PlaceViewRequest
+import dev.rosty.core.model.wa.PollCheckAnswer
+import dev.rosty.core.model.wa.PollCheckRequest
+import dev.rosty.core.model.wa.PollView
+import dev.rosty.core.model.wa.PollViewRequest
+import dev.rosty.core.model.wa.PollVote
 import dev.rosty.core.model.wa.PresenceBody
+import dev.rosty.core.model.wa.PresenceViewRequest
 import dev.rosty.core.model.wa.PushParseAnswer
 import dev.rosty.core.model.wa.PushParseRequest
 import dev.rosty.core.model.wa.PushRegistration
@@ -74,13 +83,20 @@ import dev.rosty.core.model.wa.ScheduledText
 import dev.rosty.core.model.wa.SendMediaBody
 import dev.rosty.core.model.wa.SendMediaWithBody
 import dev.rosty.core.model.wa.SendReaction
+import dev.rosty.core.model.wa.SendRich
 import dev.rosty.core.model.wa.SendText
 import dev.rosty.core.model.wa.Sent
 import dev.rosty.core.model.wa.SettingsApplyAnswer
 import dev.rosty.core.model.wa.SettingsApplyRequest
 import dev.rosty.core.model.wa.StarMessage
 import dev.rosty.core.model.wa.StartEventsBody
+import dev.rosty.core.model.wa.StaticMap
+import dev.rosty.core.model.wa.StaticMapRequest
 import dev.rosty.core.model.wa.StatusList
+import dev.rosty.core.model.wa.VcardBuildAnswer
+import dev.rosty.core.model.wa.VcardBuildRequest
+import dev.rosty.core.model.wa.VcardParseAnswer
+import dev.rosty.core.model.wa.VcardParseRequest
 import dev.rosty.core.model.wa.WaMessage
 import dev.rosty.core.model.wa.WaNamesAnswer
 import dev.rosty.core.model.wa.WaNamesRequest
@@ -457,6 +473,45 @@ interface WaOps {
     /** The sections of message info: played, read, delivered, waiting. */
     suspend fun receiptSections(req: ReceiptSectionsRequest): Outcome<ReceiptSectionsAnswer>
 
+    /** Sends a poll, a place or contact cards (E6-WA R5; an older gateway: not found). */
+    suspend fun sendRich(
+        handle: Long,
+        req: SendRich,
+    ): Outcome<Sent>
+
+    /** My vote in a poll; an empty choice takes it back (E6-WA R5). */
+    suspend fun pollVote(
+        handle: Long,
+        req: PollVote,
+    ): Outcome<Empty>
+
+    /** Stops presence updates for a contact: its chat left the screen (E6-WA R5). */
+    suspend fun unsubscribePresence(
+        handle: Long,
+        jid: String,
+    ): Outcome<Empty>
+
+    /** Whether a poll draft can be sent, and how it goes (trimmed). */
+    suspend fun pollCheck(req: PollCheckRequest): Outcome<PollCheckAnswer>
+
+    /** What a poll bubble draws: counts, shares, mine, the leader. */
+    suspend fun pollView(req: PollViewRequest): Outcome<PollView>
+
+    /** The cards of a vCard text. */
+    suspend fun vcardParse(req: VcardParseRequest): Outcome<VcardParseAnswer>
+
+    /** The vCard Rosty sends for one contact. */
+    suspend fun vcardBuild(req: VcardBuildRequest): Outcome<VcardBuildAnswer>
+
+    /** A place's title, subtitle, coordinates and `geo:` link. */
+    suspend fun placeView(req: PlaceViewRequest): Outcome<PlaceView>
+
+    /** The tiles of a small map of a point. */
+    suspend fun staticMap(req: StaticMapRequest): Outcome<StaticMap>
+
+    /** The header's presence line: typing, recording, online, last seen or nothing. */
+    suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence>
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -530,6 +585,16 @@ interface WaOps {
                 "wa.link_find",
                 "wa.link_parse",
                 "wa.receipt_sections",
+                "wa.send_rich",
+                "wa.poll_vote",
+                "wa.unsubscribe_presence",
+                "wa.poll_check",
+                "wa.poll_view",
+                "wa.vcard_parse",
+                "wa.vcard_build",
+                "wa.place_view",
+                "wa.static_map",
+                "wa.presence_view",
             )
     }
 }
@@ -910,6 +975,42 @@ class NativeWaOps(
             ReceiptSectionsRequest.serializer(),
             ReceiptSectionsAnswer.serializer(),
         )
+
+    override suspend fun sendRich(
+        handle: Long,
+        req: SendRich,
+    ) = gateway("wa.send_rich", handle, req, SendRich.serializer(), Sent.serializer())
+
+    override suspend fun pollVote(
+        handle: Long,
+        req: PollVote,
+    ) = gateway("wa.poll_vote", handle, req, PollVote.serializer(), Empty.serializer())
+
+    override suspend fun unsubscribePresence(
+        handle: Long,
+        jid: String,
+    ) = gateway("wa.unsubscribe_presence", handle, JidBody(jid), JidBody.serializer(), Empty.serializer())
+
+    override suspend fun pollCheck(req: PollCheckRequest) =
+        core.call("wa.poll_check", req, PollCheckRequest.serializer(), PollCheckAnswer.serializer())
+
+    override suspend fun pollView(req: PollViewRequest) =
+        core.call("wa.poll_view", req, PollViewRequest.serializer(), PollView.serializer())
+
+    override suspend fun vcardParse(req: VcardParseRequest) =
+        core.call("wa.vcard_parse", req, VcardParseRequest.serializer(), VcardParseAnswer.serializer())
+
+    override suspend fun vcardBuild(req: VcardBuildRequest) =
+        core.call("wa.vcard_build", req, VcardBuildRequest.serializer(), VcardBuildAnswer.serializer())
+
+    override suspend fun placeView(req: PlaceViewRequest) =
+        core.call("wa.place_view", req, PlaceViewRequest.serializer(), PlaceView.serializer())
+
+    override suspend fun staticMap(req: StaticMapRequest) =
+        core.call("wa.static_map", req, StaticMapRequest.serializer(), StaticMap.serializer())
+
+    override suspend fun presenceView(req: PresenceViewRequest) =
+        core.call("wa.presence_view", req, PresenceViewRequest.serializer(), HeaderPresence.serializer())
 }
 
 /**

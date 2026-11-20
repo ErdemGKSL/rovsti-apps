@@ -79,6 +79,8 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         state.clone(),
         wa_gateway::status_routes::PURGE_EVERY,
     );
+    // Disappearing messages whose timer ran out: now, then every few minutes.
+    let _expiry = wa_gateway::expiry::spawn_purger(state.clone(), wa_gateway::expiry::PURGE_EVERY);
     tokio::select! {
         result = serve(listener, state) => result.map_err(|e| e.to_string()),
         _ = tokio::signal::ctrl_c() => {

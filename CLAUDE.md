@@ -25,7 +25,8 @@
   linked WhatsApp instance is shared by apps via a connect key (link once in any app,
   or paste the key from another app). Stops also downloads map tiles from the
   user-chosen tile server (default the public VersaTiles server, `tiles.versatiles.org`)
-  and caches them on the device. No other backend, analytics or cloud sync.
+  and caches them on the device. Messages fetches the tiles of shared-place cards from the
+  default server and keeps them in memory only. No other backend, analytics or cloud sync.
 - Planning uses BMAD (`/bmad-help`). Its outputs go to `_bmad-output/`, and project
   knowledge goes to `docs/`.
 - Licence: GPL-3.0-or-later (`LICENSE`). Ported code keeps its upstream header and adds `Ported from Convx

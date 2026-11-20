@@ -1,4 +1,4 @@
-package dev.rosty.stops.map
+package dev.rosty.map
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -19,7 +19,8 @@ import kotlin.math.min
 class PreparedTile(
     val buffer: TileBuffer,
 ) {
-    internal class Record(
+    /** One paint record: its colour, line width at zoom 14, fill or stroke, and its paths with their bounds. */
+    class Record(
         val argb: Int,
         val width14: Float,
         val fill: Boolean,
@@ -28,7 +29,8 @@ class PreparedTile(
         val bounds: FloatArray,
     )
 
-    internal val records: Array<Record>
+    /** The records in paint order. */
+    val records: Array<Record>
 
     /** Rough heap and native size, for the buffer cache's budget. */
     val sizeBytes: Long
@@ -230,7 +232,10 @@ class TileRasterizer {
         /** A bitmap may show at most 1/64 of its data tile's side (zoom 14 data at raster zoom 20). */
         const val MAX_LEVELS_BELOW_DATA = 6
 
-        const val MAX_RASTER_ZOOM = MapMath.MAX_TILE_ZOOM + MAX_LEVELS_BELOW_DATA
+        /** The deepest zoom of a data tile (`rosty_geo::tiles::MAX_TILE_ZOOM`). */
+        const val MAX_DATA_ZOOM = 14
+
+        const val MAX_RASTER_ZOOM = MAX_DATA_ZOOM + MAX_LEVELS_BELOW_DATA
 
         /**
          * `rosty_geo::tiles::line_width` in dp: `max(0.5, width14 * 2^clamp(displayZoom - 14, -3, 2))`.
@@ -239,7 +244,7 @@ class TileRasterizer {
             width14: Float,
             displayZoom: Double,
         ): Float {
-            val scale = MapMath.pow2(min(2.0, max(-3.0, displayZoom - 14.0)))
+            val scale = Math.pow(2.0, min(2.0, max(-3.0, displayZoom - 14.0)))
             return max(0.5, width14 * scale).toFloat()
         }
 

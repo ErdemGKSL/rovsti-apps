@@ -10,6 +10,9 @@ import dev.rosty.core.model.phone.SceneLayout
 import dev.rosty.core.model.phone.ToneStep
 import dev.rosty.core.model.phone.WireCall
 import dev.rosty.core.model.phone.WireCallState
+import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.HeaderPresence
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.phone.data.CallPlacer
 import dev.rosty.phone.data.NumberDisplay
 import dev.rosty.phone.data.PlaceResult
@@ -19,16 +22,21 @@ import dev.rosty.phone.incoming.SimChip
 import dev.rosty.phone.incoming.WaCallMeta
 import dev.rosty.platform.files.ClipboardRepository
 import dev.rosty.platform.telephony.CallsApi
+import dev.rosty.wa.presence.WaPresenceWatch
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -73,6 +81,10 @@ class InCallViewModel(
     private val placer: CallPlacer? = null,
     /** The name a conference call goes by. */
     private val conferenceLabel: String = "Conference call",
+    /** E6-WA R5: the presence line of the person an outgoing WhatsApp call rings; null where there is none. */
+    private val presence: WaPresenceWatch? = null,
+    /** The gateway's events [presence] reads (`presence`, `typing`). */
+    private val presenceEvents: Flow<GatewayEvent> = emptyFlow(),
 ) {
     private val effects = Channel<InCallEffect>(Channel.BUFFERED)
 
@@ -106,6 +118,7 @@ class InCallViewModel(
         val whatsapp: Map<Int, WaCallMeta>,
         val controls: WaControls?,
         val scene: SceneAnswer?,
+        val presence: HeaderPresence,
     )
 
     private var tracked: InCallCall? = null
@@ -126,7 +139,8 @@ class InCallViewModel(
                 source.whatsapp,
                 waFacts,
                 scene,
-            ) { e, wa, facts, sc -> Extra(e, wa, facts, sc) },
+                presence?.state ?: MutableStateFlow(HeaderPresence.NONE),
+            ) { e, wa, facts, sc, seen -> Extra(e, wa, facts, sc, seen) },
         ) { snapshot, simList, pad, routes, extra -> build(snapshot, simList, pad, routes, extra) }
             .stateIn(scope, SharingStarted.Eagerly, InCallUi())
 
@@ -145,6 +159,22 @@ class InCallViewModel(
                 tracked = tracked?.let { t -> meta[t.callId]?.let { t.copy(whatsapp = true, photoJid = it.jid) } ?: t }
                 askWaControls(tracked?.let { meta[it.callId] })
             }
+        }
+        presence?.let { watch -> watchPresence(watch) }
+    }
+
+    /**
+     * E6-WA R5: while an outgoing WhatsApp call rings, the person's presence is watched (only that chat, as Messages
+     * does for the thread on screen) and shown under the name; once it is answered, ends or is not WhatsApp, it is left.
+     */
+    private fun watchPresence(watch: WaPresenceWatch) {
+        scope.launch { presenceEvents.collect { watch.onEvent(it) } }
+        scope.launch {
+            state
+                .map { ui ->
+                    ui.call?.takeIf { it.whatsapp && !it.incoming && it.phase == CallPhase.Dialing }?.photoJid
+                }.distinctUntilChanged()
+                .collect { jid -> if (jid == null) watch.leave() else watch.watch(jid, WaIds.isGroup(jid)) }
         }
     }
 
@@ -286,12 +316,18 @@ class InCallViewModel(
         val meta = wire?.let { extra.whatsapp[it.id] }
         val call = wire?.let { callOf(it, sims, meta) } ?: held?.call
         val whatsapp = if (call?.whatsapp == true) extra.controls ?: WaControls() else null
+        val presence =
+            extra.presence.takeIf {
+                call?.whatsapp == true && !call.incoming && call.phase == CallPhase.Dialing
+            } ?: HeaderPresence.NONE
         return InCallUi(
             call = call,
             muted = snapshot.audio.muted,
             canHold = wire?.canHold == true,
             multi = multiOf(snapshot, wire, sims, extra),
             whatsapp = whatsapp,
+            waPresence = presence,
+            waPresenceNowMs = if (presence == HeaderPresence.NONE) 0 else clock(),
             route = snapshot.audio.route,
             routeRows = routes.rows.toImmutableList(),
             routeOpensList = routes.opensList,

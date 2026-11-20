@@ -2,6 +2,24 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R5 (2026-11-19): rich content and presence
+
+Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r5.md`. Polls (show, vote, change, create), shared places (map
+card from the shared `:map` painter, tiles in memory only; place page with "Open in…"; send my current place), contact
+cards (show, Message, Add to contacts; send from the picker), header presence (Messages thread, Phone while a WhatsApp
+call rings). Owner follow-ups: the gateway purges expired messages, a mention or reply gets past Rosty's own mute, a
+message kept in chat does not expire.
+
+**Gateway commits to deploy**: `2e6f8fab` (purge of expired disappearing messages and their media, at start and every
+5 minutes) and `df7671fb` (rich content, schema **v12**: the `poll_votes` table). Back up the gateway database before
+deploying v12. The wire is additive: an older gateway answers the rich, vote and unsubscribe routes with not found.
+
+Try on a device: vote in a group poll and change the vote, create a poll, send my place (first-use permission),
+tap a place card and "Open in…", send a contact and "Add to contacts" on a received one, watch "online" and "typing…"
+in a thread header and under the name of a ringing WhatsApp call, keep a message in a disappearing chat.
+
+Messages now asks for location permission (only when sending a place).
+
 ## E6-WA R4 (2026-11-19): message actions
 
 Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r4.md`. Edit, forward ("Forwarded many times"), delete for me,

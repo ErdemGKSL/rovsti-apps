@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/rich",
+  "body": {
+   "chat": "120363000000000011@g.us",
+   "content": {"type": "poll", "question": "Lunch?", "options": ["Pizza", "Soup"], "multiple": true}
+  }
+ },
+ "status": 200,
+ "body": {"message_id": "3EB0P1", "timestamp_ms": 1790000000456}
+}

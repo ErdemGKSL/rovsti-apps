@@ -110,10 +110,11 @@ fn move_chat(
     let moved = tx.execute(
         "INSERT OR IGNORE INTO messages
             (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto,
-             meta_json, secret, thumb, deleted_at, deleted_by, wire_chat, wire_sender)
+             meta_json, secret, thumb, deleted_at, deleted_by, wire_chat, wire_sender,
+             expires_ms)
          SELECT instance_id, ?3, id, sender, from_me, ts_ms, body_json, raw_proto,
                 meta_json, secret, thumb, deleted_at, deleted_by,
-                COALESCE(wire_chat, ?2), wire_sender
+                COALESCE(wire_chat, ?2), wire_sender, expires_ms
          FROM messages WHERE instance_id = ?1 AND chat = ?2",
         params![i, from, into],
     )?;
@@ -156,6 +157,15 @@ fn move_chat(
     tx.execute(
         "UPDATE OR IGNORE pending_changes SET chat = ?3 WHERE instance_id = ?1 AND chat = ?2",
         params![i, from, into],
+    )?;
+    // A poll's votes go with it (E6-WA R5).
+    tx.execute(
+        "UPDATE OR IGNORE poll_votes SET chat = ?3 WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from, into],
+    )?;
+    tx.execute(
+        "DELETE FROM poll_votes WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from],
     )?;
     tx.execute(
         "DELETE FROM pending_changes WHERE instance_id = ?1 AND chat = ?2",
@@ -232,6 +242,16 @@ fn rewrite_person(
     rewritten += tx.execute(
         "UPDATE messages SET deleted_by = ?3 WHERE instance_id = ?1 AND deleted_by = ?2",
         params![i, from, into],
+    )?;
+    // One vote per person and poll: the one under `into` stays (E6-WA R5).
+    rewritten += tx.execute(
+        "UPDATE OR IGNORE poll_votes SET voter = ?3, voter_alt = COALESCE(voter_alt, ?2)
+         WHERE instance_id = ?1 AND voter = ?2",
+        params![i, from, into],
+    )?;
+    rewritten += tx.execute(
+        "DELETE FROM poll_votes WHERE instance_id = ?1 AND voter = ?2",
+        params![i, from],
     )?;
     // One reaction per person and message: the one under `into` stays.
     rewritten += tx.execute(

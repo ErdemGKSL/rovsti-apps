@@ -3,6 +3,7 @@ package dev.rosty.phone.incall
 import androidx.compose.runtime.Immutable
 import dev.rosty.core.model.phone.AudioRoute
 import dev.rosty.core.model.phone.RowKind
+import dev.rosty.core.model.wa.HeaderPresence
 import dev.rosty.phone.incoming.SimChip
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -147,6 +148,10 @@ data class InCallUi(
     val locked: Boolean = false,
     /** Set while the shown call is a WhatsApp call: which controls work. */
     val whatsapp: WaControls? = null,
+    /** E6-WA R5: online or last seen of the person an outgoing WhatsApp call rings (none otherwise, or hidden). */
+    val waPresence: HeaderPresence = HeaderPresence.NONE,
+    /** The model's clock when [waPresence] was set: "last seen" reads relative to it (the screen reads no clock). */
+    val waPresenceNowMs: Long = 0,
     /** The Held card, the conference rows and the multi-call facts. */
     val multi: MultiCallUi = MultiCallUi(),
 ) {

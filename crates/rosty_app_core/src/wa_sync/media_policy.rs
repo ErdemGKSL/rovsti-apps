@@ -48,7 +48,9 @@ impl MediaClass {
             Kind::Audio => MediaClass::Audio,
             Kind::Document => MediaClass::Document,
             Kind::Sticker => MediaClass::Sticker,
-            Kind::Text | Kind::Location | Kind::Contact | Kind::Unsupported => MediaClass::NotMedia,
+            Kind::Text | Kind::Location | Kind::Contact | Kind::Poll | Kind::Unsupported => {
+                MediaClass::NotMedia
+            }
         }
     }
 }

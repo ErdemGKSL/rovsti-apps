@@ -66,6 +66,7 @@ fn open_at(url: Option<&str>, dir: &std::path::Path, cap: Option<u64>) -> i64 {
         server_url: url.map(str::to_owned),
         cache_cap: cap,
         dir: Some(dir.to_str().unwrap().to_owned()),
+        memory: false,
     })
     .unwrap()
     .handle
@@ -216,6 +217,33 @@ fn a_miss_is_fetched_once_and_then_served_from_the_cache() {
 }
 
 #[test]
+fn a_memory_source_caches_in_memory_and_writes_no_file() {
+    let server = stub(FIXTURE, Duration::ZERO);
+    let root = temp("memory");
+    let handle = open(OpenReq {
+        server_url: Some(server.template.clone()),
+        cache_cap: None,
+        // Ignored: a memory source has no directory.
+        dir: Some(root.to_str().unwrap().to_owned()),
+        memory: true,
+    })
+    .unwrap()
+    .handle;
+    let first = tile_export(handle, 14, 9520, 6130, 0);
+    assert!(tile_buffer::is_buffer(&first));
+    assert_eq!(tile_export(handle, 14, 9520, 6130, 0), first);
+    assert_eq!(
+        server.hits.load(Ordering::SeqCst),
+        1,
+        "the second read is cached"
+    );
+    let written = std::fs::read_dir(&root).unwrap().count();
+    assert_eq!(written, 0, "nothing was written");
+    handles::global().release(handle);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn failures_are_envelopes_with_a_kind_and_nothing_broken_is_cached() {
     let root = temp("errors");
     let garbage = stub(b"not a vector tile", Duration::ZERO);
@@ -239,6 +267,7 @@ fn open_refuses_a_bad_url_with_a_reason() {
         server_url: Some("https://a.b/{z}/{x}".into()),
         cache_cap: None,
         dir: Some(temp("badurl").to_str().unwrap().into()),
+        memory: false,
     })
     .err()
     .unwrap();

@@ -3,7 +3,10 @@ package dev.rosty.messages.wa
 import android.content.Context
 import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
+import dev.rosty.core.model.wa.Card
+import dev.rosty.core.model.wa.CardNumber
 import dev.rosty.core.model.wa.FoundUrl
+import dev.rosty.core.model.wa.HeaderPresence
 import dev.rosty.core.model.wa.LinkFindRequest
 import dev.rosty.core.model.wa.LinkMeta
 import dev.rosty.core.model.wa.LinkParseRequest
@@ -13,9 +16,21 @@ import dev.rosty.core.model.wa.MentionEncoded
 import dev.rosty.core.model.wa.MentionPick
 import dev.rosty.core.model.wa.MentionQuery
 import dev.rosty.core.model.wa.MentionQueryRequest
+import dev.rosty.core.model.wa.PlaceView
+import dev.rosty.core.model.wa.PlaceViewRequest
+import dev.rosty.core.model.wa.Poll
+import dev.rosty.core.model.wa.PollCheckAnswer
+import dev.rosty.core.model.wa.PollCheckRequest
+import dev.rosty.core.model.wa.PollView
+import dev.rosty.core.model.wa.PollViewRequest
+import dev.rosty.core.model.wa.PresenceViewRequest
 import dev.rosty.core.model.wa.ReceiptMember
 import dev.rosty.core.model.wa.ReceiptSectionsRequest
 import dev.rosty.core.model.wa.SectionRows
+import dev.rosty.core.model.wa.StaticMap
+import dev.rosty.core.model.wa.StaticMapRequest
+import dev.rosty.core.model.wa.VcardBuildRequest
+import dev.rosty.core.model.wa.VcardParseRequest
 import dev.rosty.core.ops.WaOps
 import dev.rosty.platform.web.LinkThumbnails
 import dev.rosty.platform.web.PagePreviewFetcher
@@ -56,6 +71,37 @@ interface WaActionRules {
         html: String,
         url: String,
     ): LinkMeta?
+
+    /** E6-WA R5: what a poll bubble draws (`wa.poll_view`); [own] are my ids. Null: the rule could not run. */
+    suspend fun pollView(
+        poll: Poll,
+        own: List<String>,
+    ): PollView? = null
+
+    /** E6-WA R5: a poll draft as it is sent, or what keeps it from going (`wa.poll_check`). */
+    suspend fun pollCheck(draft: PollCheckRequest): PollCheckAnswer? = null
+
+    /** E6-WA R5: a place's title, subtitle and `geo:` link (`wa.place_view`); null for coordinates that are none. */
+    suspend fun placeView(req: PlaceViewRequest): PlaceView? = null
+
+    /** E6-WA R5: the cards of a vCard text (`wa.vcard_parse`). */
+    suspend fun cards(vcard: String): List<Card> = emptyList()
+
+    /** E6-WA R5: the vCard of one contact (`wa.vcard_build`). */
+    suspend fun vcard(
+        name: String,
+        numbers: List<CardNumber>,
+    ): String? = null
+
+    /** E6-WA R5: the tiles of a small map (`wa.static_map`). */
+    suspend fun staticMap(req: StaticMapRequest): Outcome<StaticMap> =
+        Outcome.Err(
+            dev.rosty.core.RustError
+                .Unsupported("wa.static_map"),
+        )
+
+    /** E6-WA R5: the presence line (`wa.presence_view`). */
+    suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence> = Outcome.Ok(HeaderPresence.NONE)
 }
 
 /** [WaActionRules] over [WaOps]. */
@@ -88,6 +134,31 @@ class NativeWaActionRules(
         html: String,
         url: String,
     ): LinkMeta? = (ops.linkParse(LinkParseRequest(html, url)) as? Outcome.Ok)?.value
+
+    override suspend fun pollView(
+        poll: Poll,
+        own: List<String>,
+    ): PollView? = ops.pollView(PollViewRequest(poll, own)).getOrNull()
+
+    override suspend fun pollCheck(draft: PollCheckRequest): PollCheckAnswer? = ops.pollCheck(draft).getOrNull()
+
+    override suspend fun placeView(req: PlaceViewRequest): PlaceView? = ops.placeView(req).getOrNull()
+
+    override suspend fun cards(vcard: String): List<Card> =
+        ops
+            .vcardParse(VcardParseRequest(vcard))
+            .getOrNull()
+            ?.cards
+            .orEmpty()
+
+    override suspend fun vcard(
+        name: String,
+        numbers: List<CardNumber>,
+    ): String? = ops.vcardBuild(VcardBuildRequest(name, numbers)).getOrNull()?.vcard
+
+    override suspend fun staticMap(req: StaticMapRequest): Outcome<StaticMap> = ops.staticMap(req)
+
+    override suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence> = ops.presenceView(req)
 }
 
 /** The host a link card names (`www.` and the port left out), for a card or chip that has no host from the page. */

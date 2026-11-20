@@ -15,11 +15,13 @@ import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MarkRead
 import dev.rosty.core.model.wa.MessageReceipts
+import dev.rosty.core.model.wa.PollVote
 import dev.rosty.core.model.wa.RevokeMessage
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.SendMediaWithBody
 import dev.rosty.core.model.wa.SendReaction
+import dev.rosty.core.model.wa.SendRich
 import dev.rosty.core.model.wa.SendText
 import dev.rosty.core.model.wa.StarMessage
 import dev.rosty.core.model.wa.StatusList
@@ -107,6 +109,15 @@ interface WaRemote {
         chat: String,
         state: TypingState,
     ): Outcome<Unit>
+
+    /** E6-WA R5: presence updates of the person of the chat on screen. */
+    suspend fun subscribePresence(jid: String): Outcome<Unit> = Outcome.Err(RustError.Unsupported("presence"))
+
+    /** E6-WA R5: the chat left the screen. */
+    suspend fun unsubscribePresence(jid: String): Outcome<Unit> = Outcome.Err(RustError.Unsupported("presence"))
+
+    /** E6-WA R5: this account shows as online while a chat is on screen (WhatsApp sends presence only then). */
+    suspend fun setAvailable(available: Boolean): Outcome<Unit> = Outcome.Err(RustError.Unsupported("presence"))
 
     suspend fun thumbnail(messageId: String): Outcome<BytesAnswer>
 
@@ -290,6 +301,17 @@ class GatewayWaRemote(
                         .starMessage(StarMessage(chat, action.messageId, action.starred))
                         .map { WaSyncOutcome.Sent() }
                 }
+
+                // E6-WA R5: a poll, a place or contact cards; my vote.
+                is WaSyncAction.SendRich -> {
+                    gateway
+                        .sendRich(SendRich(chat, action.quotedId, action.content))
+                        .map { WaSyncOutcome.Sent(it.messageId, it.timestampMs) }
+                }
+
+                is WaSyncAction.PollVote -> {
+                    gateway.pollVote(PollVote(chat, action.messageId, action.options)).map { WaSyncOutcome.Sent() }
+                }
             }
         }
 
@@ -311,6 +333,12 @@ class GatewayWaRemote(
     ): Outcome<Unit> = call { it.chatState(ChatState(chat, state)).map { } }
 
     override suspend fun thumbnail(messageId: String): Outcome<BytesAnswer> = call { it.thumbnail(messageId) }
+
+    override suspend fun subscribePresence(jid: String): Outcome<Unit> = call { it.subscribePresence(jid).map { } }
+
+    override suspend fun unsubscribePresence(jid: String): Outcome<Unit> = call { it.unsubscribePresence(jid).map { } }
+
+    override suspend fun setAvailable(available: Boolean): Outcome<Unit> = call { it.setPresence(available).map { } }
 
     override suspend fun media(messageId: String): Outcome<BytesAnswer> {
         // Not linked is not "the file is gone": the download stays queued.

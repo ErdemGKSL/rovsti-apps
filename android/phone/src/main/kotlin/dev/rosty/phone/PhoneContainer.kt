@@ -129,6 +129,8 @@ import dev.rosty.wa.calls.CallAudioPump
 import dev.rosty.wa.calls.ForgottenCalls
 import dev.rosty.wa.calls.WaCallActions
 import dev.rosty.wa.calls.WaCalls
+import dev.rosty.wa.presence.GatewayPresencePorts
+import dev.rosty.wa.presence.WaPresenceWatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -671,6 +673,18 @@ open class PhoneContainer(
             clock = clock,
             placer = placer,
             conferenceLabel = conference,
+            presence =
+                WaPresenceWatch(
+                    GatewayPresencePorts(
+                        gateway = {
+                            awaitRustReady()
+                            wa.gateway()
+                        },
+                        ops = waOps,
+                    ),
+                    scope,
+                ),
+            presenceEvents = wa.events,
         )
 
     /** The model of one Contact / Number sheet (E5.4); [scope] belongs to the sheet and ends with it. */

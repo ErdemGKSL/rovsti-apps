@@ -12,10 +12,10 @@ use rosty_wa_proto::{
     CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, ForwardMessage,
     GatewayUrl, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
     LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions,
-    MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart, PlaceCall,
+    MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart, PlaceCall, PollVote,
     ProfilesRequest, PushKeyedRegistration, PushRegistration, RevokeMessage, RichChat, RichMessage,
-    ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
-    StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
+    ScheduleText, ScheduledText, SendReaction, SendRich, SendText, Sent, SetMuted, SetPresence,
+    StarMessage, StatusList, SubscribePresence, UnsubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -563,6 +563,17 @@ impl Gateway {
         )
     }
 
+    /// Stops presence updates for a contact (E6-WA R5): call it when its chat
+    /// leaves the screen. A gateway before R5 answers `not_found`.
+    pub fn unsubscribe_presence(&self, jid: &str) -> Result<(), ClientError> {
+        self.post_unit(
+            routes::PRESENCE_UNSUBSCRIBE,
+            &UnsubscribePresence {
+                jid: jid.to_owned(),
+            },
+        )
+    }
+
     pub fn chat_state(&self, req: &ChatState) -> Result<(), ClientError> {
         self.post_unit(routes::CHAT_STATE, req)
     }
@@ -765,6 +776,30 @@ impl Gateway {
     /// `req.to`. A gateway before E6-WA R4 answers `not_found`.
     pub fn forward(&self, req: &ForwardMessage) -> Result<Sent, ClientError> {
         self.post(routes::FORWARD, req)
+    }
+
+    /// Sends a poll, a place or contact cards (E6-WA R5). The content is
+    /// checked first: what the gateway would refuse comes back as a
+    /// `bad_request` API error without a request. A gateway before R5 answers
+    /// `not_found`.
+    pub fn send_rich(&self, req: &SendRich) -> Result<Sent, ClientError> {
+        let content = req
+            .content
+            .checked()
+            .map_err(|e| ClientError::Api(ApiError::new(ErrorCode::BadRequest, e.to_string())))?;
+        self.post(
+            routes::RICH,
+            &SendRich {
+                content,
+                ..req.clone()
+            },
+        )
+    }
+
+    /// Votes in a poll, or takes my vote back with no options (E6-WA R5). A
+    /// gateway before R5 answers `not_found`.
+    pub fn poll_vote(&self, req: &PollVote) -> Result<(), ClientError> {
+        self.post_unit(routes::POLL_VOTE, req)
     }
 
     /// Who got, read or played one of my messages, and when. A gateway before

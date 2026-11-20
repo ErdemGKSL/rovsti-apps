@@ -81,6 +81,7 @@ dependencies {
     implementation(project(":design"))
     implementation(project(":platform"))
     implementation(project(":wa"))
+    implementation(project(":map"))
     implementation(project(":core-bridge"))
     implementation(libs.activity.compose)
     implementation(libs.coroutines.core)

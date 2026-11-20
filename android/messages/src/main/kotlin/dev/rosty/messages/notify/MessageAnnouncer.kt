@@ -101,6 +101,8 @@ class AnnouncerSources(
     val now: () -> Long,
     /** E6-WA R4: the linked account's own ids (number and LID) as last heard; empty when unknown. */
     val ownIds: () -> List<String> = { emptyList() },
+    /** What the user allowed (Rosty's own mutes); the announcer keeps [NotifyPolicy.current] in step. */
+    val policy: () -> NotifyPolicy = { NotifyPolicy.current },
 )
 
 /**
@@ -125,7 +127,7 @@ class MessageAnnouncer(
     private val started = AtomicBoolean(false)
     private val seen = LinkedHashSet<String>()
 
-    /** Messages of WhatsApp-muted chats, until their details say whether they address me (E6-WA R4). */
+    /** Messages of muted chats (in WhatsApp or in Rosty), until their details say whether they address me (E6-WA R4, R5). */
     private val held = LinkedHashMap<String, GatewayEvent.Message>()
 
     /** Follows the preferences and the event stream from now on. Idempotent. */
@@ -178,18 +180,23 @@ class MessageAnnouncer(
             hold(message)
             return false
         }
+        // Muted in Rosty: the same rule (E6-WA R5, owner): only a message that addresses me gets through.
+        if (sources.policy().isMuted(tag, sources.now())) {
+            hold(message)
+            return false
+        }
         return announce(message, chat)
     }
 
     /**
-     * E6-WA R4: the details of a message held back by a WhatsApp mute arrived. WhatsApp lets a message that mentions
-     * me, or quotes one of mine, through a muted chat; so does Rosty.
+     * E6-WA R4: the details of a message held back by a mute arrived. WhatsApp lets a message that mentions me, or
+     * quotes one of mine, through a muted chat; so does Rosty, through WhatsApp's mute and (R5, owner) its own.
      */
     internal suspend fun onMeta(event: GatewayEvent.MessageMetaChanged): Boolean {
         val message = synchronized(held) { held.remove(event.id) } ?: return false
         if (message.chat != event.chat || !addressesMe(event.meta)) return false
         if (OpenConversation.isShowing(WaRekeys.tagOf(message.chat))) return false
-        return announce(message, sources.chatOf(message.chat))
+        return announce(message, sources.chatOf(message.chat), pastMute = true)
     }
 
     /** `rosty_core::wa_actions::addresses_me`: one of my ids is mentioned, or the quoted message is mine. */
@@ -206,9 +213,11 @@ class MessageAnnouncer(
             if (held.size > HELD_MAX) held.remove(held.keys.first())
         }
 
+    /** [pastMute]: the message addresses me, so Rosty's own mute of the conversation does not hold it back. */
     private suspend fun announce(
         message: GatewayEvent.Message,
         chat: RichChat?,
+        pastMute: Boolean = false,
     ): Boolean {
         val jid = message.chat
         val tag = WaRekeys.tagOf(jid)
@@ -226,7 +235,7 @@ class MessageAnnouncer(
         val who = if (group) null else sources.names.ofJid(jid, WaNames.of(chat))
         val title = who?.text ?: sources.names.chatTitle(jid, chat)
         val spec = plan(title, group, recent, body) ?: return false
-        val posted = post(context, Digest(spec))
+        val posted = post(context, Digest(spec, pastMute = pastMute))
         // Nobody names the number yet: WhatsApp was asked, and the notification is renamed when the answer lands.
         if (posted && who != null && !who.named) {
             NotificationNames.renameLater(

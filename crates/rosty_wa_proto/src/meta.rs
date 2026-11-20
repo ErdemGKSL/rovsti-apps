@@ -134,9 +134,15 @@ pub struct Location {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
-    /// Live location (the sender shares their position for a while).
+    /// Live location (the sender shares their position for a while). Only its first point is known.
     #[serde(default, skip_serializing_if = "is_false")]
     pub live: bool,
+    /// A link the sender attached to the place (E6-WA R5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// A note the sender wrote with it (E6-WA R5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 /// A shared contact card.
@@ -229,6 +235,17 @@ pub struct MessageMeta {
     /// `unsupported`, so an older client shows an unsupported message).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemNote>,
+    /// A poll with its votes (E6-WA R5); the body reads as `unsupported`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<crate::rich::Poll>,
+    /// Every card of a contacts message (E6-WA R5); [`Self::contact`] keeps
+    /// the first one for older apps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<SharedContact>,
+    /// Kept in a disappearing chat ("keep in chat", E6-WA R5): it does not
+    /// disappear although [`Self::expires_s`] names the chat's timer.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub kept: bool,
 }
 
 /// From this forwarding score on WhatsApp shows "Forwarded many times".

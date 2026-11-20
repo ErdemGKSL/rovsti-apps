@@ -121,9 +121,14 @@ impl TileState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Opens the cache directory again (after the files under it were deleted).
+    /// Opens the cache directory again (after the files under it were deleted); a memory cache starts empty.
     fn reopen(&self) -> Result<(), FfiError> {
-        let fresh = DiskCache::open(&self.root, &self.source, self.cap.load(Ordering::Relaxed))?;
+        let cap = self.cap.load(Ordering::Relaxed);
+        let fresh = if self.cache().is_memory() {
+            DiskCache::in_memory(cap)
+        } else {
+            DiskCache::open(&self.root, &self.source, cap)?
+        };
         *self.cache() = fresh;
         Ok(())
     }
@@ -206,9 +211,13 @@ struct OpenReq {
     /// Cap of the per-server cache in bytes (default 128 MB).
     #[serde(default)]
     cache_cap: Option<u64>,
-    /// The cache root; default `<cache dir>/tiles`.
+    /// The cache root; default `<cache dir>/tiles`. Ignored with `memory`.
     #[serde(default)]
     dir: Option<String>,
+    /// Keep the tiles in memory only and write no file (E6-WA R5: Messages' place cards, whose tiles would tell
+    /// which places were shared). The cache is empty when opened and gone with the handle.
+    #[serde(default)]
+    memory: bool,
 }
 
 #[derive(Serialize)]
@@ -227,13 +236,18 @@ struct OpenAns {
 fn open(req: OpenReq) -> Result<OpenAns, FfiError> {
     let source = source_of(&req.server_url)?;
     let root = match req.dir {
+        _ if req.memory => PathBuf::new(),
         Some(dir) => PathBuf::from(dir),
         None => state::dirs()
             .map(|d| d.cache_dir.join("tiles"))
             .ok_or_else(|| FfiError::invalid("init was not called"))?,
     };
     let cap = req.cache_cap.unwrap_or(DEFAULT_CAP_BYTES);
-    let cache = DiskCache::open(&root, &source, cap)?;
+    let cache = if req.memory {
+        DiskCache::in_memory(cap)
+    } else {
+        DiskCache::open(&root, &source, cap)?
+    };
     let answer = |handle| OpenAns {
         handle,
         key: source.key(),
@@ -259,6 +273,7 @@ fn open(req: OpenReq) -> Result<OpenAns, FfiError> {
 
 fn open_cases() -> Vec<Case> {
     vec![
+        Case::named("memory", json!({"cache_cap": 8_388_608, "memory": true})),
         Case::new(json!({"cache_cap": 1_048_576, "dir": "$DIR/tiles"})).seeded("stops_files"),
         Case::named(
             "custom",

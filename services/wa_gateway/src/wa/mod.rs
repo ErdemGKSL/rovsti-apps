@@ -9,7 +9,9 @@ pub mod history;
 pub mod lid;
 pub mod media;
 pub mod picture;
+pub mod poll;
 pub mod reaction;
+pub mod rich;
 pub mod session;
 pub mod status;
 

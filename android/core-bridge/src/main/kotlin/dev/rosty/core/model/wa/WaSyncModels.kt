@@ -477,6 +477,10 @@ enum class WaSyncKind {
     @SerialName("contact")
     Contact,
 
+    /** A poll (E6-WA R5). */
+    @SerialName("poll")
+    Poll,
+
     /** Nothing the gateway could describe; also a deleted message whose content was never seen. */
     @SerialName("unsupported")
     Unsupported,
@@ -612,8 +616,14 @@ data class WaSyncMessage(
     @SerialName("link_preview") @EncodeDefault(NEVER) val linkPreview: LinkPreview? = null,
     /** A line of the conversation (the disappearing timer changed), not a message. */
     @EncodeDefault(NEVER) val system: SystemNote? = null,
-    /** When the message disappears (unix ms). */
+    /** When the message disappears (unix ms); null for a message kept in the chat. */
     @SerialName("expires_at") @EncodeDefault(NEVER) val expiresAt: Long? = null,
+    /** A poll with its votes and my choice ([kind] is [WaSyncKind.Poll], E6-WA R5). */
+    @EncodeDefault(NEVER) val poll: Poll? = null,
+    /** Every card of a contacts message; [contact] is the first (E6-WA R5). */
+    @EncodeDefault(NEVER) val contacts: List<SharedContact> = emptyList(),
+    /** Kept in a disappearing chat: it does not disappear (E6-WA R5). */
+    @EncodeDefault(NEVER) val kept: Boolean = false,
 )
 
 /** One `@<token>` of a text: its UTF-16 range (the `@` included) and the person it names. */
@@ -918,6 +928,26 @@ sealed interface WaSyncAction {
     data class MarkPlayed(
         @SerialName("message_id") val messageId: String,
         @EncodeDefault(NEVER) val sender: String? = null,
+    ) : WaSyncAction
+
+    /** A poll, a place or contact cards (E6-WA R5); the thread shows it at once. Send with `wa.send_rich`. */
+    @Serializable
+    @SerialName("send_rich")
+    data class SendRich(
+        val content: RichContent,
+        @SerialName("quoted_id") @EncodeDefault(NEVER) val quotedId: String? = null,
+    ) : WaSyncAction
+
+    /**
+     * My vote in the poll [messageId] (empty: taken back; E6-WA R5). My choice shows at once; the store fills
+     * [previous] and puts it back when the gateway refuses. Send with `wa.poll_vote`.
+     */
+    @Serializable
+    @SerialName("poll_vote")
+    data class PollVote(
+        @SerialName("message_id") val messageId: String,
+        val options: List<String>,
+        @EncodeDefault(NEVER) val previous: List<String>? = null,
     ) : WaSyncAction
 }
 

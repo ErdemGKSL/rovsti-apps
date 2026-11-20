@@ -4,7 +4,11 @@
 //! has no data for is a zero-byte file, so it is not asked for again. Recency
 //! and sizes live in `index.json` (an `LruIndex`); a missing or unreadable
 //! index is rebuilt from the files.
+//!
+//! A cache made with [`DiskCache::in_memory`] keeps the same index but holds the tiles in memory and writes nothing:
+//! for an app whose tiles would tell what its user looked at (Messages' place cards, E6-WA R5).
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -41,9 +45,28 @@ pub struct DiskCache {
     cap: u64,
     index: LruIndex<String>,
     dirty: bool,
+    /// The tiles by key when nothing goes to disk ([`DiskCache::in_memory`]).
+    memory: Option<HashMap<String, Vec<u8>>>,
 }
 
 impl DiskCache {
+    /// A cache that holds at most `cap` bytes of tiles in memory and touches no file. It is empty when made and
+    /// gone with the process.
+    pub fn in_memory(cap: u64) -> Self {
+        Self {
+            dir: PathBuf::new(),
+            cap,
+            index: LruIndex::new(),
+            dirty: false,
+            memory: Some(HashMap::new()),
+        }
+    }
+
+    /// True for a cache made with [`DiskCache::in_memory`].
+    pub fn is_memory(&self) -> bool {
+        self.memory.is_some()
+    }
+
     /// Opens (creating) the cache directory of `src` under `root`.
     pub fn open(root: &Path, src: &TileSource, cap: u64) -> io::Result<Self> {
         let dir = root.join(src.key());
@@ -60,6 +83,7 @@ impl DiskCache {
             cap,
             index,
             dirty,
+            memory: None,
         };
         cache.evict();
         Ok(cache)
@@ -95,6 +119,11 @@ impl DiskCache {
         if !self.index.contains(&k) {
             return None;
         }
+        if let Some(memory) = &self.memory {
+            let bytes = memory.get(&k).cloned();
+            self.index.touch(&k);
+            return bytes;
+        }
         match fs::read(self.path(id)) {
             Ok(bytes) => {
                 self.index.touch(&k);
@@ -112,6 +141,12 @@ impl DiskCache {
     /// Stores a tile (empty `bytes` for "no data here"), then evicts the least
     /// recently used tiles until the cache fits its cap.
     pub fn put(&mut self, id: TileId, bytes: &[u8]) -> io::Result<()> {
+        if let Some(memory) = self.memory.as_mut() {
+            memory.insert(key(id), bytes.to_vec());
+            self.index.insert(key(id), bytes.len() as u64);
+            self.evict();
+            return Ok(());
+        }
         let path = self.path(id);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -133,6 +168,12 @@ impl DiskCache {
     }
 
     fn evict(&mut self) {
+        if let Some(memory) = self.memory.as_mut() {
+            for k in self.index.evict_to(self.cap) {
+                memory.remove(&k);
+            }
+            return;
+        }
         for k in self.index.evict_to(self.cap) {
             if let Some(id) = parse_key(&k)
                 && let Err(e) = fs::remove_file(self.path(id))
@@ -145,7 +186,7 @@ impl DiskCache {
 
     /// Writes `index.json` if anything changed.
     pub fn flush(&mut self) -> io::Result<()> {
-        if !self.dirty {
+        if !self.dirty || self.memory.is_some() {
             return Ok(());
         }
         let json = serde_json::to_vec(&self.index).map_err(io::Error::other)?;
@@ -332,6 +373,22 @@ mod tests {
 
     fn id(x: u32) -> TileId {
         TileId::new(14, x, 7).unwrap()
+    }
+
+    #[test]
+    fn a_memory_cache_keeps_tiles_in_memory_only() {
+        let mut cache = DiskCache::in_memory(10);
+        assert!(cache.is_memory());
+        cache.put(id(1), b"abcd").unwrap();
+        cache.put(id(2), b"efgh").unwrap();
+        assert_eq!(cache.get(id(1)).as_deref(), Some(&b"abcd"[..]));
+        // Over the cap the least recently used tile goes (2 was used longest ago).
+        cache.put(id(3), b"ijkl").unwrap();
+        assert!(cache.contains(id(1)) && !cache.contains(id(2)) && cache.contains(id(3)));
+        assert_eq!(cache.get(id(2)), None);
+        assert_eq!(cache.total_bytes(), 8);
+        cache.flush().unwrap();
+        assert_eq!(cache.dir, PathBuf::new(), "no directory");
     }
 
     fn open(root: &Path, cap: u64) -> DiskCache {

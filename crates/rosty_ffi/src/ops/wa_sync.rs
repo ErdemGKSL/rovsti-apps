@@ -3202,7 +3202,8 @@ mod tests {
                 let mut request = json!({"handle": handle, "now_ms": 0, "client_id": "c", "chat": "c", "id": "i",
                     "limit": 1, "events": [], "chats": [], "messages": [], "text": "", "max_bytes": 0,
                     "seq": 0, "items": [], "network": "wifi", "new_pn": "x",
-                    "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}});
+                    "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}, "jid": "g",
+                    "group": {"jid": "g", "subject": "", "participants": []}});
                 // A download has other outcomes than a send.
                 if spec.name == "wa_sync.media_settle" {
                     request["outcome"] = json!({"kind": "cancelled"});

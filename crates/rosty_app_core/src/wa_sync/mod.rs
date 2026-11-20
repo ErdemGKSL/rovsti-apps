@@ -43,6 +43,9 @@ mod backfill;
 mod contact_match_tests;
 #[cfg(test)]
 mod gateway_wire_tests;
+pub mod groups;
+#[cfg(test)]
+mod groups_tests;
 mod history;
 #[cfg(test)]
 mod history_tests;
@@ -74,6 +77,7 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+pub use groups::{GroupPage, GroupStored, MAX_MEMBER_PAGE, StoredGroup};
 pub use history::{
     Cell, HISTORY_CHATS, HISTORY_MESSAGES, HISTORY_ROW_BYTES, HISTORY_THUMB_BYTES, HistoryCount,
     HistorySnapshot,

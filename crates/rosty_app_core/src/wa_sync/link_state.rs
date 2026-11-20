@@ -196,7 +196,9 @@ pub(super) fn wipe_account(conn: &Connection, wipe: &Wipe) -> Result<Vec<String>
          DELETE FROM media;
          DELETE FROM person;
          DELETE FROM alias;
-         DELETE FROM merge_log;",
+         DELETE FROM merge_log;
+         DELETE FROM groups;
+         DELETE FROM group_members;",
     )?;
     if !wipe.keep_outbox {
         conn.execute("DELETE FROM outbox", [])?;

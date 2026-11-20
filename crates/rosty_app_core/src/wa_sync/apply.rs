@@ -380,6 +380,12 @@ pub(super) fn upsert(
     if was_new {
         apply_pending(conn, chat, id, incoming.now_ms)?;
     }
+    // A group change moves the stored group along once, when its line first carries it (E6-WA R6).
+    if let Some(note) = merged.extra.system.as_ref()
+        && existing.as_ref().is_none_or(|e| e.extra.system.is_none())
+    {
+        super::groups::apply_note(conn, chat, note, merged.ts)?;
+    }
     Ok(if was_new {
         Upsert::New
     } else {
@@ -645,6 +651,7 @@ fn set_chat_meta(conn: &Connection, jid: &str, meta: &ChatMeta) -> Result<()> {
             meta.ephemeral_s.filter(|s| *s > 0),
         ],
     )?;
+    super::groups::set_left(conn, jid, meta.left)?;
     Ok(())
 }
 

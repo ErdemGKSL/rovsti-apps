@@ -280,6 +280,8 @@ fn a_new_file_has_the_identity_tables_and_columns() {
             "alias",
             "chat_sync",
             "chats",
+            "group_members",
+            "groups",
             "media",
             "merge_log",
             "messages",
@@ -1136,6 +1138,7 @@ fn chat_settings_are_combined_as_the_rule_says() {
                     muted_until_ms: Some(50_000),
                     marked_unread: true,
                     ephemeral_s: None,
+                    left: false,
                 },
             },
             GatewayEvent::ChatMeta {
@@ -1148,6 +1151,7 @@ fn chat_settings_are_combined_as_the_rule_says() {
                     muted_until_ms: Some(MUTED_FOREVER),
                     marked_unread: false,
                     ephemeral_s: None,
+                    left: false,
                 },
             },
             // Cleared on another device while it was still the LID chat.

@@ -122,6 +122,9 @@ class AppPermissions(
                         Manifest.permission.POST_NOTIFICATIONS,
                         // WhatsApp voice notes, asked at the first hold of the composer's microphone (E6-WA R3).
                         Manifest.permission.RECORD_AUDIO,
+                        // WhatsApp "Location": one fix of my place, asked at the first send (E6-WA R5).
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
                     ),
                 groups = listOf(PermissionGroup.CONTACTS, PermissionGroup.NOTIFICATIONS, PermissionGroup.MICROPHONE),
                 special = setOf(SpecialKind.ExactAlarms),

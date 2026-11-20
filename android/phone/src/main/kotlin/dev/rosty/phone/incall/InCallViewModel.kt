@@ -316,16 +316,18 @@ class InCallViewModel(
         val meta = wire?.let { extra.whatsapp[it.id] }
         val call = wire?.let { callOf(it, sims, meta) } ?: held?.call
         val whatsapp = if (call?.whatsapp == true) extra.controls ?: WaControls() else null
+        val presence =
+            extra.presence.takeIf {
+                call?.whatsapp == true && !call.incoming && call.phase == CallPhase.Dialing
+            } ?: HeaderPresence.NONE
         return InCallUi(
             call = call,
             muted = snapshot.audio.muted,
             canHold = wire?.canHold == true,
             multi = multiOf(snapshot, wire, sims, extra),
             whatsapp = whatsapp,
-            waPresence =
-                extra.presence.takeIf {
-                    call?.whatsapp == true && !call.incoming && call.phase == CallPhase.Dialing
-                } ?: HeaderPresence.NONE,
+            waPresence = presence,
+            waPresenceNowMs = if (presence == HeaderPresence.NONE) 0 else clock(),
             route = snapshot.audio.route,
             routeRows = routes.rows.toImmutableList(),
             routeOpensList = routes.opensList,

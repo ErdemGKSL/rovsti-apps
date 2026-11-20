@@ -394,7 +394,7 @@ private fun Identity(
         if (call.whatsapp) {
             Spacer(Modifier.height(InCallMetrics.NameGap))
             WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(InCallTags.WaAudio))
-            strings.waPresence(ui.waPresence, System.currentTimeMillis())?.let {
+            strings.waPresence(ui.waPresence, ui.waPresenceNowMs)?.let {
                 Spacer(Modifier.height(InCallMetrics.NameGap))
                 RostyText(
                     it,

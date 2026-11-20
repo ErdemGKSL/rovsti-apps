@@ -150,6 +150,8 @@ data class InCallUi(
     val whatsapp: WaControls? = null,
     /** E6-WA R5: online or last seen of the person an outgoing WhatsApp call rings (none otherwise, or hidden). */
     val waPresence: HeaderPresence = HeaderPresence.NONE,
+    /** The model's clock when [waPresence] was set: "last seen" reads relative to it (the screen reads no clock). */
+    val waPresenceNowMs: Long = 0,
     /** The Held card, the conference rows and the multi-call facts. */
     val multi: MultiCallUi = MultiCallUi(),
 ) {

@@ -207,6 +207,14 @@ interface WaSyncOps {
     /** Deletes the disappearing messages that are due, with their media rows (E6-WA R4). */
     suspend fun expire(req: WaSyncExpireRequest): Outcome<WaSyncExpired>
 
+    /** Keeps the answer of `wa.group` (E6-WA R6). */
+    suspend fun groupStore(
+        req: dev.rosty.core.model.wa.WaSyncGroupStoreRequest,
+    ): Outcome<dev.rosty.core.model.wa.WaSyncGroupStored>
+
+    /** A page of a group's members with my role and what I may do (E6-WA R6). */
+    suspend fun groupRead(req: dev.rosty.core.model.wa.WaSyncGroupReadRequest): Outcome<dev.rosty.core.model.wa.WaSyncGroupPage>
+
     /** Takes in the gateway's epoch, account epoch, own ids and history progress. */
     suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted>
 
@@ -277,6 +285,8 @@ interface WaSyncOps {
                 "wa_sync.chat_media",
                 "wa_sync.media_viewed",
                 "wa_sync.expire",
+                "wa_sync.group_store",
+                "wa_sync.group_read",
                 "wa_sync.mark_played",
                 "wa_sync.note_status",
                 "wa_sync.account_changed",
@@ -421,6 +431,26 @@ class NativeWaSyncOps(
 
     override suspend fun expire(req: WaSyncExpireRequest) =
         core.call("wa_sync.expire", req, WaSyncExpireRequest.serializer(), WaSyncExpired.serializer())
+
+    override suspend fun groupStore(req: dev.rosty.core.model.wa.WaSyncGroupStoreRequest) =
+        core.call(
+            "wa_sync.group_store",
+            req,
+            dev.rosty.core.model.wa.WaSyncGroupStoreRequest
+                .serializer(),
+            dev.rosty.core.model.wa.WaSyncGroupStored
+                .serializer(),
+        )
+
+    override suspend fun groupRead(req: dev.rosty.core.model.wa.WaSyncGroupReadRequest) =
+        core.call(
+            "wa_sync.group_read",
+            req,
+            dev.rosty.core.model.wa.WaSyncGroupReadRequest
+                .serializer(),
+            dev.rosty.core.model.wa.WaSyncGroupPage
+                .serializer(),
+        )
 
     override suspend fun noteStatus(req: WaSyncNoteStatusRequest) =
         core.call("wa_sync.note_status", req, WaSyncNoteStatusRequest.serializer(), WaSyncStatusNoted.serializer())

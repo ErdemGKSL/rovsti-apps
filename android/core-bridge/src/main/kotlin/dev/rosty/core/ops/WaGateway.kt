@@ -1,6 +1,7 @@
 package dev.rosty.core.ops
 
 import dev.rosty.core.Outcome
+import dev.rosty.core.map
 import dev.rosty.core.Rust
 import dev.rosty.core.RustError
 import dev.rosty.core.RustEvent
@@ -251,6 +252,32 @@ class WaGateway internal constructor(
 
     /** My vote in a poll, or my vote taken back with no options (E6-WA R5). */
     suspend fun pollVote(req: dev.rosty.core.model.wa.PollVote): Outcome<Empty> = guarded { ops.pollVote(id, req) }
+
+    /** Changes a group (E6-WA R6): members, subject, description, picture, settings, link, requests, leave. */
+    suspend fun groupAction(
+        group: String,
+        action: dev.rosty.core.model.wa.GroupActionKind,
+    ): Outcome<dev.rosty.core.model.wa.GroupActionDone> =
+        guarded { ops.groupAction(id, dev.rosty.core.model.wa.GroupAction(group, action)) }
+
+    /** Creates a group (E6-WA R6). */
+    suspend fun createGroup(req: dev.rosty.core.model.wa.CreateGroup): Outcome<dev.rosty.core.model.wa.GroupCreated> =
+        guarded { ops.groupCreate(id, req) }
+
+    /** The group an invite link (or code) leads to (E6-WA R6). */
+    suspend fun invitePreview(code: String): Outcome<dev.rosty.core.model.wa.InvitePreview> =
+        guarded { ops.groupInvitePreview(id, code) }
+
+    /** Joins a group with an invite link (E6-WA R6). */
+    suspend fun joinGroup(code: String): Outcome<dev.rosty.core.model.wa.GroupJoined> = guarded { ops.groupJoin(id, code) }
+
+    /** The pending join requests of a group (E6-WA R6). */
+    suspend fun joinRequests(jid: String): Outcome<List<dev.rosty.core.model.wa.JoinRequest>> =
+        guarded { ops.groupRequests(id, jid).map { it.requests } }
+
+    /** A community's groups (E6-WA R6). */
+    suspend fun subgroups(jid: String): Outcome<List<dev.rosty.core.model.wa.Subgroup>> =
+        guarded { ops.groupSubgroups(id, jid).map { it.groups } }
 
     /** Who got, read or played one of my messages, and when (E6-WA R4). */
     suspend fun messageReceipts(

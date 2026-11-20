@@ -204,6 +204,36 @@ object WaContracts : ContractModels {
                 "wa.presence_view",
                 ok = listOf("typing", "group", "hidden"),
             )
+            // E6-WA R6: groups.
+            handleOp<dev.rosty.core.model.wa.GroupAction, dev.rosty.core.model.wa.GroupActionDone>(
+                "wa.group_action",
+                ok = listOf("invite_link", "leave"),
+                err = listOf("refused", "invalid"),
+            )
+            handleOp<dev.rosty.core.model.wa.CreateGroup, dev.rosty.core.model.wa.GroupCreated>("wa.group_create")
+            handleOp<dev.rosty.core.model.wa.InviteCodeBody, dev.rosty.core.model.wa.InvitePreview>(
+                "wa.group_invite_preview",
+                err = listOf("reset"),
+            )
+            handleOp<dev.rosty.core.model.wa.InviteCodeBody, dev.rosty.core.model.wa.GroupJoined>(
+                "wa.group_join",
+                ok = listOf("pending"),
+            )
+            handleOp<JidBody, dev.rosty.core.model.wa.JoinRequestsAnswer>("wa.group_requests")
+            handleOp<JidBody, dev.rosty.core.model.wa.SubgroupsAnswer>("wa.group_subgroups")
+            op<dev.rosty.core.model.wa.GroupNoticeRequest, dev.rosty.core.model.wa.GroupNotice>(
+                "wa.group_notice",
+                ok = listOf("left", "subject"),
+            )
+            op<dev.rosty.core.model.wa.InviteFindRequest, dev.rosty.core.model.wa.InviteFindAnswer>(
+                "wa.invite_find",
+                ok = listOf("pasted", "none"),
+            )
+            op<dev.rosty.core.model.wa.GroupResultsRequest, dev.rosty.core.model.wa.BulkSummary>("wa.group_results")
+            op<dev.rosty.core.model.wa.GroupCanRequest, dev.rosty.core.model.wa.GroupCanAnswer>(
+                "wa.group_can",
+                ok = listOf("super_admin"),
+            )
             handleOp<StarMessage, Empty>("wa.star_message")
             handleOp<ChatAction, Empty>("wa.chat_action", ok = listOf("mute"))
             handleOp<PlaceCallBody, CallStarted>("wa.place_call", err = listOf("offline"))

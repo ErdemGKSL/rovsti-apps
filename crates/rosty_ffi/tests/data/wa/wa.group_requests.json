@@ -1,0 +1,16 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/groups/120363000000000071%40g.us/requests"
+ },
+ "status": 200,
+ "body": [
+  {
+   "jid": "100000000073@s.whatsapp.net",
+   "requested_ms": 1790000000000
+  },
+  {
+   "jid": "777000000000074@lid"
+  }
+ ]
+}

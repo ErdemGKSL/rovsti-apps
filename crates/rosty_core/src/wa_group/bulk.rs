@@ -36,6 +36,7 @@ pub enum Outcome {
     InviteInstead,
     /// Their privacy refuses adds and no invite was offered.
     Privacy,
+    #[serde(rename = "not_on_whatsapp")]
     NotOnWhatsApp,
     Already,
     Full,

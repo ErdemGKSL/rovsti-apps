@@ -1,0 +1,20 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/groups/120363000000000070%40g.us/subgroups"
+ },
+ "status": 200,
+ "body": [
+  {
+   "jid": "120363000000000072@g.us",
+   "subject": "Duyurular",
+   "size": 900,
+   "announcement": true
+  },
+  {
+   "jid": "120363000000000071@g.us",
+   "subject": "Aile",
+   "size": 12
+  }
+ ]
+}

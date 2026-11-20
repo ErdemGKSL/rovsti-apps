@@ -191,6 +191,22 @@ interface WaWords {
             else -> "Disappearing messages turned on: ${timer(seconds)}"
         }
 
+    /** E6-WA R6: the composer's line in an announcement group where I am not an admin. */
+    val announceOnly: String get() = "Only admins can send messages."
+
+    /** E6-WA R6: the composer's line in a group I left or was removed from. */
+    val leftGroup: String get() = "You’re no longer a member of this group."
+
+    /** E6-WA R6: the text of a group notice line; [actor] and [targets] are the names Rust's notice asks for. */
+    fun groupNotice(
+        notice: dev.rosty.core.model.wa.GroupNotice,
+        actor: String?,
+        targets: List<String>,
+    ): String = "The group changed"
+
+    /** E6-WA R6: what "you" reads as among the people a notice names. */
+    val youInNotice: String get() = "you"
+
     companion object {
         const val DAY_S = 86_400L
         const val WEEK_S = 604_800L
@@ -609,11 +625,49 @@ class WaThreadViewModel(
                 .getOrNull()
                 ?.firstOrNull { it.jid == jid }
         numbers = sources.names.numbersOf(jid)
+        if (WaIds.isGroup(jid)) readGroup(session)
         chatRead = true
         if (unreadAtOpen == null) unreadAtOpen = chat?.unread ?: 0
         publish()
         markRead()
         prefetch()
+    }
+
+    /**
+     * E6-WA R6: what the stored group says about the composer: an announcement group where I am not an admin, or a
+     * group I left. A group never fetched is asked from the gateway once (the store then reads again).
+     */
+    private suspend fun readGroup(session: WaSession) {
+        val page = session.store.groupRead(jid, sources.ownIds(), limit = 1).getOrNull()
+        groupBlock =
+            when {
+                page?.group?.settings?.left == true -> words.leftGroup
+                page?.view?.announceOnly == true -> words.announceOnly
+                else -> null
+            }
+        if ((page?.group?.fetchedMs ?: 0L) == 0L && !groupAsked) {
+            groupAsked = true
+            viewModelScope.launch {
+                (sources.remote.group(jid) as? Outcome.Ok)?.value?.let { sources.offline.groupStore(it) }
+            }
+        }
+    }
+
+    /** E6-WA R6: the line in place of the composer; null: the composer. */
+    private var groupBlock: String? = null
+    private var groupAsked = false
+
+    /** E6-WA R6: the text of a group's notice line, through Rust's template and the name rule. */
+    private suspend fun groupNoticeText(system: dev.rosty.core.model.wa.SystemNote): String {
+        val own = sources.ownIds()
+        val notice = sources.rules?.groupNotice(system.groupNote(), own) ?: return words.groupNotice(
+            dev.rosty.core.model.wa.GroupNotice("other", dev.rosty.core.model.wa.NoticeActor("nobody")),
+            null,
+            emptyList(),
+        )
+        val actor = notice.actor.jid?.let { senderOf(it, null) }
+        val targets = notice.targets.map { if (it.me) words.youInNotice else senderOf(it.jid, null) }
+        return words.groupNotice(notice, actor, targets)
     }
 
     /**
@@ -691,7 +745,7 @@ class WaThreadViewModel(
                 loaded = true,
                 opens = if (unreadAtOpen != null) unreadOpening else 0,
                 hasOlder = hasStoredOlder || (!reachedStart && rows.isNotEmpty()),
-                composer = ComposerMode.Ready(words.placeholder),
+                composer = groupBlock?.let { ComposerMode.ReadOnly(it) } ?: ComposerMode.Ready(words.placeholder),
                 reply = replyOf(),
                 editing = editing,
                 linkChip = linkChip,
@@ -755,6 +809,16 @@ class WaThreadViewModel(
                 row.editedMs != null && !row.deleted -> words.edited(clock)
                 else -> clock
             }
+        row.system?.takeIf { it.isGroup }?.let { system ->
+            return BubbleUi(
+                key = keyOf(row),
+                outgoing = row.fromMe,
+                text = groupNoticeText(system),
+                meta = clock,
+                atMs = row.timestampMs,
+                notice = true,
+            )
+        }
         row.system?.let { system ->
             val mine = row.fromMe || system.by == DELETED_BY_ME
             val by = if (mine || system.by == null) null else senderOf(system.by, null)

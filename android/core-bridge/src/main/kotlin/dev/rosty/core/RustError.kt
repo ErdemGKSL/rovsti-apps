@@ -23,6 +23,10 @@ sealed class RustError(
     val reason: String?
         get() = ((detail as? JsonObject)?.get("reason") as? JsonPrimitive)?.takeIf { it.isString }?.content
 
+    /** The gateway's error code a failed gateway call carries (`detail.code`: `conflict`, `not_found`, ...), or null. */
+    val code: String?
+        get() = ((detail as? JsonObject)?.get("code") as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     class Invalid(
         message: String,
         detail: JsonElement? = null,

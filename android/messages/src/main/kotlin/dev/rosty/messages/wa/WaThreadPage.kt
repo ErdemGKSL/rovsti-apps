@@ -67,6 +67,7 @@ import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.settings.replies.rememberComposerExtras
 import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.messages.wa.group.presentJoin
 import dev.rosty.messages.wa.rich.RichCard
 import dev.rosty.messages.wa.rich.rememberRichActions
 import dev.rosty.platform.audio.AndroidVoiceRecorder
@@ -157,6 +158,20 @@ class ResourceWaWords(
     override val unavailableOpenPhone = res.getString(R.string.wa_unavailable_open_phone)
 
     override fun timer(seconds: Long): String = timerLabel(res, seconds)
+
+    override val announceOnly: String get() = res.getString(R.string.wa_group_announce_only)
+
+    override val leftGroup: String get() = res.getString(R.string.wa_group_left_notice)
+
+    private val groupWords by lazy { dev.rosty.messages.wa.group.GroupWords(res) }
+
+    override fun groupNotice(
+        notice: dev.rosty.core.model.wa.GroupNotice,
+        actor: String?,
+        targets: List<String>,
+    ): String = groupWords.notice(notice, actor, targets)
+
+    override val youInNotice: String get() = groupWords.you
 
     override fun timerNotice(
         seconds: Long,
@@ -518,11 +533,20 @@ fun WaThreadPage(
                 onReact = { b, emoji -> model.react(b.key, emoji) },
                 pillsFor = detector::pills,
                 onPill = { pill ->
-                    handlePill(
-                        context,
-                        pill,
-                        overlays,
-                    ) { text, sensitive -> container.clipboard.copy(text, sensitive = sensitive) }
+                    if (pill.kind == dev.rosty.messages.conversation.PillKind.Link && isInviteLink(pill.value)) {
+                        // E6-WA R6: a group invite opens its preview here, not in a browser.
+                        overlays.presentJoin(res, container, pill.value, navigator)
+                    } else {
+                        handlePill(
+                            context,
+                            pill,
+                            overlays,
+                        ) { text, sensitive -> container.clipboard.copy(text, sensitive = sensitive) }
+                    }
+                },
+                // E6-WA R6: a group's header opens its info page.
+                onAvatar = {
+                    if (WaIds.isGroup(model.jid)) navigator.push(MessagesRoute.WaGroupInfo(model.chatJid.value))
                 },
                 headerMenu =
                     headerMenu(
@@ -564,7 +588,9 @@ fun WaThreadPage(
                             }
                         }
                 },
-                onOpenLink = { url -> openLink(context, url) },
+                onOpenLink = { url ->
+                    if (isInviteLink(url)) overlays.presentJoin(res, container, url, navigator) else openLink(context, url)
+                },
                 onRemoveAttachment = model::removeAttachment,
                 attachMenu = attachMenu,
                 onMediaAction = { bubble, action -> model.mediaAction(bubble.key, action) },
@@ -610,6 +636,11 @@ fun WaThreadPage(
         batch?.let { WaBatchScreen(it, batchActions) { bytes -> Formatter.formatShortFileSize(context, bytes) } }
     }
 }
+
+/** A `chat.whatsapp.com` group invite (Rust's `wa.invite_find` reads the code when the sheet opens). */
+internal fun isInviteLink(url: String): Boolean =
+    runCatching { android.net.Uri.parse(url.trim()).host?.lowercase()?.removePrefix("www.") == "chat.whatsapp.com" }
+        .getOrDefault(false)
 
 /** Opens a link of a card in the app that shows it. */
 private fun openLink(

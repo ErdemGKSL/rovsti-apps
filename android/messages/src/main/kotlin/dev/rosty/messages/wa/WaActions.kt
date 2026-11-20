@@ -102,6 +102,21 @@ interface WaActionRules {
 
     /** E6-WA R5: the presence line (`wa.presence_view`). */
     suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence> = Outcome.Ok(HeaderPresence.NONE)
+
+    /** E6-WA R6: the notice line of a group change (`wa.group_notice`); [own] are my ids. Null: the rule could not run. */
+    suspend fun groupNotice(
+        note: dev.rosty.core.model.wa.GroupNote,
+        own: List<String>,
+    ): dev.rosty.core.model.wa.GroupNotice? = null
+
+    /** E6-WA R6: an invite link in [text], and [text] read whole as a link or code (`wa.invite_find`). */
+    suspend fun inviteFind(text: String): dev.rosty.core.model.wa.InviteFindAnswer? = null
+
+    /** E6-WA R6: what a bulk action did per person (`wa.group_results`). */
+    suspend fun groupResults(
+        kind: String,
+        results: List<dev.rosty.core.model.wa.ParticipantResult>,
+    ): dev.rosty.core.model.wa.BulkSummary? = null
 }
 
 /** [WaActionRules] over [WaOps]. */
@@ -159,6 +174,19 @@ class NativeWaActionRules(
     override suspend fun staticMap(req: StaticMapRequest): Outcome<StaticMap> = ops.staticMap(req)
 
     override suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence> = ops.presenceView(req)
+
+    override suspend fun groupNotice(
+        note: dev.rosty.core.model.wa.GroupNote,
+        own: List<String>,
+    ) = ops.groupNotice(dev.rosty.core.model.wa.GroupNoticeRequest(note, own)).getOrNull()
+
+    override suspend fun inviteFind(text: String) =
+        ops.inviteFind(dev.rosty.core.model.wa.InviteFindRequest(text)).getOrNull()
+
+    override suspend fun groupResults(
+        kind: String,
+        results: List<dev.rosty.core.model.wa.ParticipantResult>,
+    ) = ops.groupResults(dev.rosty.core.model.wa.GroupResultsRequest(kind, results)).getOrNull()
 }
 
 /** The host a link card names (`www.` and the port left out), for a card or chip that has no host from the page. */

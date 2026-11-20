@@ -614,6 +614,27 @@ class WaOffline(
         sessionState.value?.runner?.observe(groups, profiles)
     }
 
+    /** E6-WA R6: keeps the gateway's answer for a group; false without an open store. */
+    suspend fun groupStore(group: GroupInfo): Boolean {
+        val store = sessionState.value?.store ?: return false
+        val stored = store.groupStore(group, now()) is Outcome.Ok
+        if (stored) changeBus.tryEmit(setOf(group.jid))
+        return stored
+    }
+
+    /** E6-WA R6: a page of a stored group with my role; null without an open store. */
+    suspend fun groupRead(
+        jid: String,
+        own: List<String>,
+        query: String? = null,
+        offset: Int = 0,
+        limit: Int = WaSyncStore.GROUP_PAGE,
+    ): dev.rosty.core.model.wa.WaSyncGroupPage? =
+        sessionState.value
+            ?.store
+            ?.groupRead(jid, own, query, offset, limit)
+            ?.getOrNull()
+
     /** Rows of [chats] changed outside the sync (a thumbnail or a download was stored): the readers read again. */
     fun noteChanged(chats: Set<String>) {
         changeBus.tryEmit(chats)

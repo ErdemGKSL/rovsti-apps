@@ -76,13 +76,21 @@ Library facts (whatsapp-rust 0.7.0 from crates.io, the version `Cargo.lock` pins
 - **Map tiles in Messages stay in memory.** The vault rule (`wa-vault.md` 13.1: nothing readable about messages on
   disk) would be broken by a plaintext tile cache that shows which areas were shared. `tiles.open` gains `memory: true`
   (an in-memory LRU with the same index, no files); Messages opens its source that way. Stops is unchanged.
-- **The tile server is the one chosen in Stops.** Stops answers it through a signature-protected provider
-  (`content://dev.rosty.stops.tileserver/server`, the `WA_LINK`-style permission `dev.rosty.permission.MAP_TILES`).
-  With Stops not installed, the public VersaTiles server (the default of `rosty_geo::tiles`) is used. No other map
+- **The tile server is the default one (changed during the round).** The plan had Stops share its chosen server
+  through a signature-protected provider. That provider was not built: Messages uses the public VersaTiles server, the
+  default of `rosty_geo::tiles` and of Stops, so a Stops user with another server sees Messages' cards from the
+  default one. Owner question 2 decides whether to share Stops' choice or give Messages its own setting. No other map
   service is called; the system map app is only reached through "Open in…" (a `geo:` intent the user picks).
-- **The map code is shared.** A new module `:map` (`dev.rosty.map`) takes Stops' tile painting
-  (`PreparedTile`/`TileRasterizer`, `MapMath`/`TileKey`, `TileSource`) and adds a static map (a few tiles around a
-  point, painted once) and the tile-server share. Stops imports them from there.
+- **The map code is shared.** A new module `:map` (`dev.rosty.map`) takes Stops' tile painting (`TileRasterizer`)
+  and adds `StaticMapPainter` (the tiles `wa.static_map` names around a point, painted once). Stops imports it from
+  there. `MapMath`/`TileKey`/`TileSource` stay in Stops (only Stops pans and zooms).
+- **The place page is a static map.** A tap on a place card opens a page sheet with a larger static map, the pin, the
+  name and "Open in…"; panning and zooming are left to the app the user picks.
+- **Voters are listed inline.** Each poll option lists up to three voters, then "+N"; there is no voters sheet.
+- **One rich outbox action.** `wa_sync` has `SendRich { content, quoted_id }` (poll draft, place or contacts) and
+  `PollVote`, not one action per kind; a rich send settles by message id, not by echo text.
+- **Contacts go one per pick.** The system picker returns one contact; the wire takes a contacts array (up to 20),
+  which received messages use.
 
 ## Wire additions (agreed up front; all additive)
 
@@ -115,8 +123,8 @@ Library facts (whatsapp-rust 0.7.0 from crates.io, the version `Cargo.lock` pins
 | 5 | Gateway rich content (own commit, not deployed): schema v12; polls in convert (every creation form) and votes (`Converted::PollVote`), decrypted with the stored secret through the pure library call and the gateway's pairs, early votes kept encrypted until their poll arrives, history votes taken as they come, my vote recorded on send; the rich send route (poll built as the library builds it, with the chat's timer; location; contacts array); the vote route; presence unsubscribe; every card of a contacts array; keep in chat (live and history) sets `kept` and clears `expires_ms`, undo restores it. Tests. | `services/wa_gateway` |
 | 6 | Device store `wa_sync`: `Kind::Poll`; `extra_json` takes `poll`, `contacts`, `kept`; a kept row has no `expires_at`; outbox actions `SendPoll`, `SendLocation`, `SendContacts` (shown at once) and `PollVote` (my choice shows at once, undone on refusal); rows carry `poll`, `contacts`, `kept`. No schema change (v7 stays). Tests incl. the edge cases below. | `rosty_app_core` |
 | 7 | FFI and bridge: ops `wa.poll_check`, `wa.poll_view`, `wa.vcard_parse`, `wa.vcard_build`, `wa.place_view`, `wa.static_map`, `wa.presence_view`; `tiles.open {memory}`; fixtures, `OPS.md`, Kotlin models, facades and fakes. | `rosty_ffi`, `rosty_tiles`, `:core-bridge` |
-| 8 | Shared map: module `:map` (moved tile painting, static map, tile server share); Stops on it, its provider. | `:map`, Stops |
-| 9 | Messages UI: poll bubble (bars, counts, voters sheet, vote and change), poll create sheet (question, 2 to 12 options, "Allow multiple answers"); location card (static map, name, address, live mark), full-screen map with pin and "Open in…", send current place (permission at first use, one-shot fix, preview); contact card (name, numbers, Message, Add to contacts) and sending contacts from the picker; header presence with the subscription rules and my availability while a thread is on screen. Goldens light and dark, strings en and tr. | Messages, `:platform` |
+| 8 | Shared map: module `:map` (moved tile painting, static map); Stops on it. | `:map`, Stops |
+| 9 | Messages UI: poll bubble (bars, counts, voters inline, vote and change), poll create sheet (question, 2 to 12 options, "Allow multiple answers"); location card (static map, name, address, live mark), full-screen map with pin and "Open in…", send current place (permission at first use, one-shot fix, preview); contact card (name, numbers, Message, Add to contacts) and sending contacts from the picker; header presence with the subscription rules and my availability while a thread is on screen. Goldens light and dark, strings en and tr. | Messages, `:platform` |
 | 10 | Presence through `:wa`: `WaPresenceWatch` (subscribe on watch, unsubscribe on leave, events after leave ignored); Phone shows it under the name while a WhatsApp call rings out. | `:wa`, Phone |
 
 Order: 1 (gateway commit), 2, 3, 4, 5 (gateway commit), 6, 7, then 8 to 10.
@@ -150,11 +158,42 @@ Edge cases and the tests that cover them:
 
 1. Map tiles in Messages are kept in memory only (vault rule); every cold start fetches the tiles of a card again from
    the tile server. Fine, or allow a small disk cache (it would show the areas shared in chats)?
-2. Messages reads the tile server from Stops; without Stops it uses the public VersaTiles server. Should Messages have
-   its own tile-server setting instead?
+2. Messages uses the public VersaTiles server (the default) for its map cards, whatever server Stops is set to. Share
+   Stops' choice (a signature-protected provider), give Messages its own setting, or keep the default?
 3. Sending my current place: Messages now asks for location permission (it had none). Precise or approximate only?
    This round asks for precise and accepts approximate.
 
 ## Evidence
 
-(filled at the end of the round)
+Branch: the R5 worktree branch, from `messages-kotlin` at `b70db89e`.
+
+| Step | Commit(s) |
+|---|---|
+| 1 Gateway purge (owner decision, deploy) | `2e6f8fab` |
+| 2 Mention or reply past Rosty's mute (owner decision) | `e4c289e7` |
+| 3 `rosty_core::wa_rich` | `4cd99044` |
+| 4 proto and client | `ad4d632e` |
+| 5 Gateway rich content, schema v12 (deploy) | `df7671fb` |
+| 6 `wa_sync` | `236a3b39` |
+| 7 FFI, fixtures, `OPS.md`, `tiles.open {memory}`, bridge | `201ca9be`, `3536763e`, `7883e5ff` |
+| 8 `:map`, Stops on it | `7883e5ff` |
+| 9 Messages UI, tests, goldens, permissions | `e9912abe`, `dcb10eb7`, `e2c08f1e` |
+| 10 `WaPresenceWatch`, Phone | `7883e5ff`, `fbb98503`, `dcb10eb7`, `50b3ccef` |
+| Owner follow-up 3 (keep in chat) | in `df7671fb` (gateway) and `236a3b39` (device) |
+
+Checks (host Rust with `--profile checks`, Gradle Release tasks only, plain flavor for screenshots):
+- Rust package set (`rosty_core`, `rosty_app_core`, `rosty_geo`, `rosty_tiles`, `rosty_wa_proto`, `rosty_wa_client`,
+  `rosty_android`, `rosty_ffi`, `wa_gateway`): fmt, clippy and tests pass (2145 tests);
+  `cargo check --release -p rosty_android --target aarch64-linux-android` passes. Clippy with `-D warnings` still
+  flags the dead code in `crates/rosty_app_core/src/cards/model.rs`, which was there before this round.
+- Gradle: Messages 684 tests (plain and firebase), lint, Roborazzi verify; Phone 876 tests (plain and firebase),
+  lint, verify; `:wa` (223), `:map`, `:stops`, `:core-bridge` (258), `:platform` (596) tests and lint; `:wa` and
+  Stops verify; `:design` 404 tests (ConventionTest); `spotlessCheck`; no orphan goldens (Messages, Phone, `:wa`, Stops).
+- New goldens, light and dark: `wa-r5-poll`, `wa-r5-poll-sheet`, `wa-r5-place`, `wa-r5-place-preview`,
+  `wa-r5-contact`, `wa-r5-presence-online`, `wa-r5-presence-typing` (Messages), `e6wa-r5-wa-calling-presence` (Phone).
+- Found while closing: `WaPresenceWatch` waited again without end when the clock did not move with its wait (a clock
+  set back); it now drops the typing states it waited for. Contact-card buttons now sit one per line: "Add to
+  Contacts" was cut off beside "Message".
+- Also found by the gates: Phone's call screen read the wall clock for "last seen" (ConventionTest); it now takes the
+  model's clock (`50b3ccef`). `:platform`'s permission lists did not yet name Messages' location permissions
+  (`e2c08f1e`).

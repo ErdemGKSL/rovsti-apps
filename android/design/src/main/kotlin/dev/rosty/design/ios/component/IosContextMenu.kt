@@ -9,7 +9,8 @@
  * 1.05 lift, scale-from-anchor with a blur that clears, and the above/below rule are Convx's. Rosty additions: the lifted
  * copy is measured at the anchor's exact size and carries a shadow, the menu is kept inside the safe area, reduce
  * motion fades instead of scaling, the panel takes focus and a finger that went down on the trigger can slide over it
- * ([SlideTarget]).
+ * ([SlideTarget]). A menu over an open sheet can skip its scrim ([IosContextMenuEntry.dimsOverSheet]) so the sheet
+ * keeps its surface.
  */
 package dev.rosty.design.ios.component
 
@@ -197,6 +198,8 @@ open class IosContextMenuEntry(
     private val debugTag: String = "menu.panel",
     title: String = "",
     titleRes: Int = R.string.design_menu,
+    /** Rosty: `false` leaves the scrim out while a sheet is open below (the outside tap still dismisses). */
+    private val dimsOverSheet: Boolean = true,
 ) : OverlayEntry(modal = true, title = title, titleRes = titleRes),
     SlideTarget {
     private var slide by mutableStateOf<Flow<Offset>?>(null)
@@ -247,7 +250,13 @@ open class IosContextMenuEntry(
         val menuOrigin = remember { intArrayOf(0, 0) }
 
         // Rosty: 0.14 on a light page (Convx's 0.28 greyed a white page), 0.28 on a dark one.
-        val scrimTarget = if (IosTheme.colors.isDark) ScrimAlpha else ScrimAlpha / 2f
+        val overSheet = !dimsOverSheet && !host.controller.topBelow(this).isNaN()
+        val scrimTarget =
+            when {
+                overSheet -> 0f
+                IosTheme.colors.isDark -> ScrimAlpha
+                else -> ScrimAlpha / 2f
+            }
         val scrimAlpha =
             transition.animateFloat(
                 transitionSpec = {

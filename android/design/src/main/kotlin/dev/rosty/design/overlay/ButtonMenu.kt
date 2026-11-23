@@ -32,7 +32,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 class ButtonMenuEntry(
     anchor: Rect,
     items: ImmutableList<MenuItem>,
-) : IosContextMenuEntry(anchor = anchor, sections = items.toSections())
+) : IosContextMenuEntry(anchor = anchor, sections = items.toSections(), dimsOverSheet = false)
 
 /**
  * Makes this element open a [ButtonMenuEntry] on *down* (not on lift), anchored to the element's bounds as they were

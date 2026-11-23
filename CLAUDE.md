@@ -26,7 +26,8 @@
   or paste the key from another app). Stops also downloads map tiles from the
   user-chosen tile server (default the public VersaTiles server, `tiles.versatiles.org`)
   and caches them on the device. Messages fetches the tiles of shared-place cards from the
-  default server and keeps them in memory only. No other backend, analytics or cloud sync.
+  default server into a small bounded cache (cleared with the WhatsApp data). No other backend,
+  analytics or cloud sync.
 - Planning uses BMAD (`/bmad-help`). Its outputs go to `_bmad-output/`, and project
   knowledge goes to `docs/`.
 - Licence: GPL-3.0-or-later (`LICENSE`). Ported code keeps its upstream header and adds `Ported from Convx

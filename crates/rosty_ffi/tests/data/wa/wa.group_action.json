@@ -1,0 +1,37 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/groups/action",
+  "body": {
+   "group": "120363000000000071@g.us",
+   "action": {
+    "type": "add",
+    "participants": [
+     "100000000071@s.whatsapp.net",
+     "100000000072@s.whatsapp.net",
+     "100000000073@s.whatsapp.net"
+    ]
+   }
+  }
+ },
+ "status": 200,
+ "body": {
+  "results": [
+   {
+    "jid": "100000000071@s.whatsapp.net"
+   },
+   {
+    "jid": "100000000072@s.whatsapp.net",
+    "error": "409"
+   },
+   {
+    "jid": "100000000073@s.whatsapp.net",
+    "error": "403",
+    "invite": {
+     "code": "PrivacyInviteCode01",
+     "expiration": 1790000000
+    }
+   }
+  ]
+ }
+}

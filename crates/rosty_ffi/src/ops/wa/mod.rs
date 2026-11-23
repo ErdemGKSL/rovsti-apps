@@ -38,6 +38,7 @@ macro_rules! gateway_fn {
 }
 
 mod actions;
+mod groups;
 mod live;
 mod people;
 mod pure;
@@ -67,6 +68,7 @@ pub(super) const TABLES: &[&[OpSpec]] = &[
     people::OPS,
     actions::OPS,
     rich::OPS,
+    groups::OPS,
 ];
 
 /// Media and pictures up to this size travel inside the JSON answer; larger ones become a file.

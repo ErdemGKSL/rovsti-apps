@@ -1,0 +1,23 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/groups",
+  "body": {
+   "subject": "Aile",
+   "participants": [
+    "100000000071@s.whatsapp.net",
+    "100000000072@s.whatsapp.net"
+   ]
+  }
+ },
+ "status": 200,
+ "body": {
+  "jid": "120363000000000099@g.us",
+  "results": [
+   {
+    "jid": "100000000072@s.whatsapp.net",
+    "error": "403"
+   }
+  ]
+ }
+}

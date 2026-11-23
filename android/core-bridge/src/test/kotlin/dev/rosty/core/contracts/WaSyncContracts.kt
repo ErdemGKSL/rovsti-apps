@@ -221,6 +221,13 @@ object WaSyncContracts : ContractModels {
                 err = listOf("not_view_once", "unknown"),
             )
             op<WaSyncExpireRequest, WaSyncExpired>("wa_sync.expire", ok = listOf("nothing"))
+            op<dev.rosty.core.model.wa.WaSyncGroupStoreRequest, dev.rosty.core.model.wa.WaSyncGroupStored>(
+                "wa_sync.group_store",
+            )
+            op<dev.rosty.core.model.wa.WaSyncGroupReadRequest, dev.rosty.core.model.wa.WaSyncGroupPage>(
+                "wa_sync.group_read",
+                ok = listOf("unknown"),
+            )
             op<WaSyncMarkPlayedRequest, WaSyncPlayed>(
                 "wa_sync.mark_played",
                 ok = listOf("again"),

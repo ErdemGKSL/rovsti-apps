@@ -1,0 +1,13 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/groups/join",
+  "body": {
+   "code": "AbCdEfGhIjKlMnOpQrStUv"
+  }
+ },
+ "status": 200,
+ "body": {
+  "jid": "120363000000000071@g.us"
+ }
+}

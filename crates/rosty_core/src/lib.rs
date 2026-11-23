@@ -130,6 +130,8 @@ pub mod vcard;
 pub mod voice_player;
 /// WhatsApp message actions: edit, forward, mentions, link previews, message info, disappearing messages.
 pub mod wa_actions;
+/// WhatsApp groups: roles, members, notice lines, invite links, bulk results, communities (E6-WA R6).
+pub mod wa_group;
 /// WhatsApp identity: LID and phone-number ids of one person, the canonical key, the name rule.
 pub mod wa_identity;
 pub mod wa_rich;

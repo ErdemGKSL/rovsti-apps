@@ -412,6 +412,36 @@ class WaSyncStore internal constructor(
      */
     suspend fun expire(nowMs: Long): Outcome<WaSyncExpired> = live { ops.expire(WaSyncExpireRequest(id, nowMs)) }
 
+    /** Keeps the answer of `wa.group` for the info page and the composer (E6-WA R6). */
+    suspend fun groupStore(
+        group: GroupInfo,
+        nowMs: Long,
+    ): Outcome<dev.rosty.core.model.wa.WaSyncGroupStored> =
+        live {
+            ops.groupStore(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupStoreRequest(id, nowMs, group),
+            )
+        }
+
+    /**
+     * A page of the group [jid]: its stored metadata, [limit] members from [offset] (me first, admins, then by name)
+     * filtered by [query], my role among [own] and what I may do (E6-WA R6).
+     */
+    suspend fun groupRead(
+        jid: String,
+        own: List<String>,
+        query: String? = null,
+        offset: Int = 0,
+        limit: Int = GROUP_PAGE,
+    ): Outcome<dev.rosty.core.model.wa.WaSyncGroupPage> =
+        live {
+            ops.groupRead(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupReadRequest(id, jid, own, query, offset, limit),
+            )
+        }
+
     // ---- the gateway process, the linked account, history progress, unlink
 
     /**
@@ -567,6 +597,9 @@ class WaSyncStore internal constructor(
     companion object {
         /** A stop for one catch-up on identity pairs; the cursor is stored, so the next run continues. */
         private const val MAX_IDENTITY_PAGES = 200
+
+        /** Members read at once for the group info page (the store answers at most 500). */
+        const val GROUP_PAGE = 100
 
         /**
          * Unlink without a store at hand: deletes the store files of [instanceId] in [dir] (the core's data

@@ -207,11 +207,23 @@ data class SystemNote(
     val type: String,
     @EncodeDefault(NEVER) val seconds: Long? = null,
     @EncodeDefault(NEVER) val by: String? = null,
+    /** A group change (E6-WA R6): `add`, `remove`, `leave`, `join_link`, `promote`, `demote`, `subject`, ... */
+    @EncodeDefault(NEVER) val action: String? = null,
+    @EncodeDefault(NEVER) val participants: List<String> = emptyList(),
+    /** The new subject or description, `on` / `off`, or `removed`. */
+    @EncodeDefault(NEVER) val value: String? = null,
 ) {
     val isDisappearing: Boolean get() = type == DISAPPEARING
 
+    /** A line of a group change (`wa.group_notice` reads it). */
+    val isGroup: Boolean get() = type == GROUP
+
+    /** The line as `wa.group_notice` takes it. */
+    fun groupNote(): GroupNote = GroupNote(action.orEmpty(), by, participants, value)
+
     companion object {
         const val DISAPPEARING = "disappearing"
+        const val GROUP = "group"
     }
 }
 
@@ -660,6 +672,8 @@ data class ChatMeta(
     @SerialName("marked_unread") @EncodeDefault(NEVER) val markedUnread: Boolean = false,
     /** The disappearing timer in seconds; null when off. */
     @SerialName("ephemeral_s") @EncodeDefault(NEVER) val ephemeralS: Long? = null,
+    /** A group I left or was removed from (E6-WA R6): readable, nothing can be sent. */
+    @EncodeDefault(NEVER) val left: Boolean = false,
 )
 
 /** A chat with its meta (`rosty_wa_proto::RichChat`, whose summary fields are flat). */
@@ -813,6 +827,8 @@ data class Participant(
     @EncodeDefault(NEVER) val lid: String? = null,
     /** Their phone-number JID, when the gateway knows it; a member who hides their number has none. */
     @EncodeDefault(NEVER) val pn: String? = null,
+    /** `superadmin`, `admin` or `member` (E6-WA R6); older gateways leave it out ([admin] stays). */
+    @EncodeDefault(NEVER) val role: String? = null,
 )
 
 @Serializable
@@ -824,6 +840,21 @@ data class GroupInfo(
     @EncodeDefault(NEVER) val announce: Boolean = false,
     /** How WhatsApp names the members on the wire: `pn` or `lid`; older gateways leave it out. */
     @SerialName("addressing_mode") @EncodeDefault(NEVER) val addressingMode: String? = null,
+    // E6-WA R6 from here on; older gateways leave every field out.
+    @SerialName("created_ms") @EncodeDefault(NEVER) val createdMs: Long? = null,
+    @EncodeDefault(NEVER) val creator: String? = null,
+    @SerialName("description_id") @EncodeDefault(NEVER) val descriptionId: String? = null,
+    /** Only admins edit the subject, description and picture. */
+    @EncodeDefault(NEVER) val locked: Boolean = false,
+    /** New members need an admin's approval. */
+    @EncodeDefault(NEVER) val approval: Boolean = false,
+    /** Only admins add members. */
+    @SerialName("admins_add") @EncodeDefault(NEVER) val adminsAdd: Boolean = false,
+    @SerialName("ephemeral_s") @EncodeDefault(NEVER) val ephemeralS: Long? = null,
+    @EncodeDefault(NEVER) val size: Int? = null,
+    @EncodeDefault(NEVER) val community: CommunityRef? = null,
+    /** I left the group or was removed; the members may be empty. */
+    @EncodeDefault(NEVER) val left: Boolean = false,
 )
 
 // ---- identity: LID and phone-number pairs

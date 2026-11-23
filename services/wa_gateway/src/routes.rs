@@ -85,11 +85,12 @@ pub fn router(state: AppState) -> Router {
         .route(r::MESSAGE_MEDIA, get(message_media))
         .route(r::REACT, post(react))
         .route(r::CONTACTS_LOOKUP, post(lookup_users))
-        .route(r::GROUPS, get(groups))
+        .route(r::GROUPS, get(groups).post(crate::group_routes::create))
         .route(r::GROUP, get(group))
         .route(r::IDENTITY_MAPPINGS, get(identity_mappings))
         .merge(crate::wa::calls::routes())
         .merge(crate::rich_routes::routes())
+        .merge(crate::group_routes::routes())
         .merge(crate::status_routes::routes())
         .merge(crate::people_routes::routes())
         .layer(axum::middleware::from_fn(crate::request_log::log_request))
@@ -1012,9 +1013,23 @@ async fn group(
     Path(jid): Path<String>,
 ) -> ApiResult<Json<GroupInfo>> {
     check_jid(&jid)?;
-    let mut group = [state.driver().group(&auth.instance, jid).await?];
+    let found = match state.driver().group(&auth.instance, jid.clone()).await {
+        Ok(found) => found,
+        // A group I left: what is left to say (E6-WA R6).
+        Err(e) => {
+            return Ok(Json(
+                crate::group_routes::left_group(&state, &auth.instance, &jid, e).await?,
+            ));
+        }
+    };
+    let mut group = [found];
     name_participants(&state, &auth.instance, &mut group).await?;
-    let [group] = group;
+    let [mut group] = group;
+    group.left = group.left
+        || state
+            .store()
+            .group_left(auth.instance.clone(), group.jid.clone())
+            .await?;
     Ok(Json(group))
 }
 

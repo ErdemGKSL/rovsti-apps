@@ -1480,6 +1480,125 @@ class FakeWaSyncOps(
             )
         }
 
+    /** E6-WA R6: the groups kept by [groupStore], by jid. */
+    val groups =
+        mutableMapOf<String, Pair<dev.rosty.core.model.wa.StoredGroup, List<dev.rosty.core.model.wa.GroupMember>>>()
+
+    override suspend fun groupStore(req: dev.rosty.core.model.wa.WaSyncGroupStoreRequest) =
+        synchronized(lock) {
+            writes += req
+            val info = req.group
+            val kept = groups[info.jid]
+            if (info.left && info.participants.isEmpty() && kept != null) {
+                val (group, members) = kept
+                groups[info.jid] = group.copy(settings = group.settings.copy(left = true)) to members
+                return@synchronized ok(
+                    dev.rosty.core.model.wa
+                        .WaSyncGroupStored(HANDLE, 0),
+                )
+            }
+            val group =
+                dev.rosty.core.model.wa.StoredGroup(
+                    jid = info.jid,
+                    subject = info.subject.ifEmpty { null },
+                    description = info.description,
+                    descriptionId = info.descriptionId,
+                    createdMs = info.createdMs,
+                    creator = info.creator,
+                    settings =
+                        dev.rosty.core.model.wa.GroupSettings(
+                            announce = info.announce,
+                            locked = info.locked,
+                            approval = info.approval,
+                            adminsAdd = info.adminsAdd,
+                            left = info.left,
+                        ),
+                    ephemeralS = info.ephemeralS,
+                    size = info.size,
+                    communityKind = info.community?.kind,
+                    communityParent = info.community?.parent,
+                    fetchedMs = req.nowMs,
+                )
+            val members =
+                info.participants.map { p ->
+                    dev.rosty.core.model.wa.GroupMember(
+                        jid = p.jid,
+                        alt = listOfNotNull(p.pn, p.lid).firstOrNull { it != p.jid },
+                        role = p.role ?: if (p.admin) "admin" else "member",
+                        name = p.name,
+                    )
+                }
+            groups[info.jid] = group to members
+            ok(
+                dev.rosty.core.model.wa
+                    .WaSyncGroupStored(HANDLE, members.size),
+            )
+        }
+
+    override suspend fun groupRead(req: dev.rosty.core.model.wa.WaSyncGroupReadRequest) =
+        synchronized(lock) {
+            val (group, members) = groups[req.jid] ?: (null to emptyList())
+
+            fun mine(m: dev.rosty.core.model.wa.GroupMember) = req.own.any { it == m.jid || it == m.alt }
+            val me = members.firstOrNull(::mine)?.role?.takeIf { group?.settings?.left != true }
+            val settings =
+                group?.settings ?: dev.rosty.core.model.wa
+                    .GroupSettings()
+            val admin = me != null && me != "member"
+            val abilities =
+                if (me == null) {
+                    dev.rosty.core.model.wa
+                        .GroupAbilities()
+                } else {
+                    dev.rosty.core.model.wa.GroupAbilities(
+                        send = admin || !settings.announce,
+                        editInfo = admin || !settings.locked,
+                        add = admin || !settings.adminsAdd,
+                        manage = admin,
+                        settings = admin,
+                        inviteLink = admin,
+                        requests = admin,
+                        leave = true,
+                    )
+                }
+            val admins = members.count { it.isAdmin }
+            val rank = mapOf("superadmin" to 0, "admin" to 1, "member" to 2)
+            val ordered =
+                members
+                    .sortedWith(
+                        compareBy<dev.rosty.core.model.wa.GroupMember>(
+                            { !mine(it) },
+                            { rank[it.role] ?: 2 },
+                            { it.name == null },
+                            { it.name?.lowercase() },
+                            { it.jid },
+                        ),
+                    ).filter { m ->
+                        val q =
+                            req.query
+                                ?.trim()
+                                ?.lowercase()
+                                .orEmpty()
+                        q.isEmpty() || m.name?.lowercase()?.contains(q) == true || m.jid.contains(q)
+                    }
+            ok(
+                dev.rosty.core.model.wa.WaSyncGroupPage(
+                    handle = HANDLE,
+                    group = group,
+                    members = ordered.drop(req.offset).take(req.limit),
+                    total = ordered.size,
+                    admins = admins,
+                    view =
+                        dev.rosty.core.model.wa.GroupView(
+                            myRole = me,
+                            abilities = abilities,
+                            lastAdmin = admin && admins <= 1 && members.size > 1,
+                            announceOnly = me != null && settings.announce && !abilities.send,
+                        ),
+                ),
+            )
+        }
+
     override suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed> =
         synchronized(lock) {
             writes += req

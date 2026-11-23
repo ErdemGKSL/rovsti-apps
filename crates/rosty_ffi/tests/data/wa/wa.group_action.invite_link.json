@@ -1,0 +1,17 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/groups/action",
+  "body": {
+   "group": "120363000000000071@g.us",
+   "action": {
+    "type": "invite_link",
+    "reset": true
+   }
+  }
+ },
+ "status": 200,
+ "body": {
+  "link": "https://chat.whatsapp.com/AbCdEfGhIjKlMnOpQrStUv"
+ }
+}

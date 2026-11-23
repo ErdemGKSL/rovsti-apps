@@ -512,6 +512,62 @@ interface WaOps {
     /** The header's presence line: typing, recording, online, last seen or nothing. */
     suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence>
 
+    /** Changes a group (E6-WA R6); a refusal of WhatsApp is a conflict, an older gateway not found. */
+    suspend fun groupAction(
+        handle: Long,
+        req: dev.rosty.core.model.wa.GroupAction,
+    ): Outcome<dev.rosty.core.model.wa.GroupActionDone> = unsupported("wa.group_action")
+
+    /** Creates a group (E6-WA R6). */
+    suspend fun groupCreate(
+        handle: Long,
+        req: dev.rosty.core.model.wa.CreateGroup,
+    ): Outcome<dev.rosty.core.model.wa.GroupCreated> = unsupported("wa.group_create")
+
+    /** The group an invite link leads to (E6-WA R6); not found for a reset or unknown code. */
+    suspend fun groupInvitePreview(
+        handle: Long,
+        code: String,
+    ): Outcome<dev.rosty.core.model.wa.InvitePreview> = unsupported("wa.group_invite_preview")
+
+    /** Joins a group with an invite link (E6-WA R6). */
+    suspend fun groupJoin(
+        handle: Long,
+        code: String,
+    ): Outcome<dev.rosty.core.model.wa.GroupJoined> = unsupported("wa.group_join")
+
+    /** The pending join requests of a group (E6-WA R6). */
+    suspend fun groupRequests(
+        handle: Long,
+        jid: String,
+    ): Outcome<dev.rosty.core.model.wa.JoinRequestsAnswer> = unsupported("wa.group_requests")
+
+    /** A community's groups (E6-WA R6). */
+    suspend fun groupSubgroups(
+        handle: Long,
+        jid: String,
+    ): Outcome<dev.rosty.core.model.wa.SubgroupsAnswer> = unsupported("wa.group_subgroups")
+
+    /** The notice line of a group change (E6-WA R6). */
+    suspend fun groupNotice(
+        req: dev.rosty.core.model.wa.GroupNoticeRequest,
+    ): Outcome<dev.rosty.core.model.wa.GroupNotice> = unsupported("wa.group_notice")
+
+    /** An invite link in a text (E6-WA R6). */
+    suspend fun inviteFind(
+        req: dev.rosty.core.model.wa.InviteFindRequest,
+    ): Outcome<dev.rosty.core.model.wa.InviteFindAnswer> = unsupported("wa.invite_find")
+
+    /** The summary of a bulk action's results (E6-WA R6). */
+    suspend fun groupResults(
+        req: dev.rosty.core.model.wa.GroupResultsRequest,
+    ): Outcome<dev.rosty.core.model.wa.BulkSummary> = unsupported("wa.group_results")
+
+    /** Whether one role may act on another (E6-WA R6). */
+    suspend fun groupCan(
+        req: dev.rosty.core.model.wa.GroupCanRequest,
+    ): Outcome<dev.rosty.core.model.wa.GroupCanAnswer> = unsupported("wa.group_can")
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -595,9 +651,25 @@ interface WaOps {
                 "wa.place_view",
                 "wa.static_map",
                 "wa.presence_view",
+                "wa.group_action",
+                "wa.group_create",
+                "wa.group_invite_preview",
+                "wa.group_join",
+                "wa.group_requests",
+                "wa.group_subgroups",
+                "wa.group_notice",
+                "wa.invite_find",
+                "wa.group_results",
+                "wa.group_can",
             )
     }
 }
+
+private fun <T> unsupported(op: String): Outcome<T> =
+    Outcome.Err(
+        dev.rosty.core.RustError
+            .Unsupported(op),
+    )
 
 /** [WaOps] over a [RustCore]; the real core runs every call on `RustDispatcher`. */
 class NativeWaOps(
@@ -1011,6 +1083,124 @@ class NativeWaOps(
 
     override suspend fun presenceView(req: PresenceViewRequest) =
         core.call("wa.presence_view", req, PresenceViewRequest.serializer(), HeaderPresence.serializer())
+
+    override suspend fun groupAction(
+        handle: Long,
+        req: dev.rosty.core.model.wa.GroupAction,
+    ) = gateway(
+        "wa.group_action",
+        handle,
+        req,
+        dev.rosty.core.model.wa.GroupAction
+            .serializer(),
+        dev.rosty.core.model.wa.GroupActionDone
+            .serializer(),
+    )
+
+    override suspend fun groupCreate(
+        handle: Long,
+        req: dev.rosty.core.model.wa.CreateGroup,
+    ) = gateway(
+        "wa.group_create",
+        handle,
+        req,
+        dev.rosty.core.model.wa.CreateGroup
+            .serializer(),
+        dev.rosty.core.model.wa.GroupCreated
+            .serializer(),
+    )
+
+    override suspend fun groupInvitePreview(
+        handle: Long,
+        code: String,
+    ) = gateway(
+        "wa.group_invite_preview",
+        handle,
+        dev.rosty.core.model.wa
+            .InviteCodeBody(code),
+        dev.rosty.core.model.wa.InviteCodeBody
+            .serializer(),
+        dev.rosty.core.model.wa.InvitePreview
+            .serializer(),
+    )
+
+    override suspend fun groupJoin(
+        handle: Long,
+        code: String,
+    ) = gateway(
+        "wa.group_join",
+        handle,
+        dev.rosty.core.model.wa
+            .InviteCodeBody(code),
+        dev.rosty.core.model.wa.InviteCodeBody
+            .serializer(),
+        dev.rosty.core.model.wa.GroupJoined
+            .serializer(),
+    )
+
+    override suspend fun groupRequests(
+        handle: Long,
+        jid: String,
+    ) = gateway(
+        "wa.group_requests",
+        handle,
+        JidBody(jid),
+        JidBody.serializer(),
+        dev.rosty.core.model.wa.JoinRequestsAnswer
+            .serializer(),
+    )
+
+    override suspend fun groupSubgroups(
+        handle: Long,
+        jid: String,
+    ) = gateway(
+        "wa.group_subgroups",
+        handle,
+        JidBody(jid),
+        JidBody.serializer(),
+        dev.rosty.core.model.wa.SubgroupsAnswer
+            .serializer(),
+    )
+
+    override suspend fun groupNotice(req: dev.rosty.core.model.wa.GroupNoticeRequest) =
+        core.call(
+            "wa.group_notice",
+            req,
+            dev.rosty.core.model.wa.GroupNoticeRequest
+                .serializer(),
+            dev.rosty.core.model.wa.GroupNotice
+                .serializer(),
+        )
+
+    override suspend fun inviteFind(req: dev.rosty.core.model.wa.InviteFindRequest) =
+        core.call(
+            "wa.invite_find",
+            req,
+            dev.rosty.core.model.wa.InviteFindRequest
+                .serializer(),
+            dev.rosty.core.model.wa.InviteFindAnswer
+                .serializer(),
+        )
+
+    override suspend fun groupResults(req: dev.rosty.core.model.wa.GroupResultsRequest) =
+        core.call(
+            "wa.group_results",
+            req,
+            dev.rosty.core.model.wa.GroupResultsRequest
+                .serializer(),
+            dev.rosty.core.model.wa.BulkSummary
+                .serializer(),
+        )
+
+    override suspend fun groupCan(req: dev.rosty.core.model.wa.GroupCanRequest) =
+        core.call(
+            "wa.group_can",
+            req,
+            dev.rosty.core.model.wa.GroupCanRequest
+                .serializer(),
+            dev.rosty.core.model.wa.GroupCanAnswer
+                .serializer(),
+        )
 }
 
 /**

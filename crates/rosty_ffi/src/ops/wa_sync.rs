@@ -36,12 +36,12 @@ use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
     self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction,
-    Expired, Fetch, FetchPage, Fetched, GalleryPage, HistoryCount, HistoryProgress, HistoryReport,
-    HistorySnapshot, IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue,
-    MediaEntry, MediaQueued, MediaSettled, MediaState, MediaStats, MessageRow, Network, Observed,
-    Opened, OutboxItem, Outcome, Played, Reconciled, ResolvedId, Settled, StarredCursor,
-    StarredPage, StatusNote, StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor,
-    ThreadPage, Viewed, Wiped,
+    Expired, Fetch, FetchPage, Fetched, GalleryPage, GroupPage, GroupStored, HistoryCount,
+    HistoryProgress, HistoryReport, HistorySnapshot, IdentityApplied, IdentityCaughtUp,
+    IdentitySnapshot, Kind, MediaDue, MediaEntry, MediaQueued, MediaSettled, MediaState,
+    MediaStats, MessageRow, Network, Observed, Opened, OutboxItem, Outcome, Played, Reconciled,
+    ResolvedId, Settled, StarredCursor, StarredPage, StatusNote, StatusNoted, Store, StoredChats,
+    StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -292,6 +292,20 @@ pub(super) const OPS: &[OpSpec] = &[
         history_cases
     ),
     op!("wa_sync.wipe", WipeReq, Wiped, wipe, wipe_cases),
+    op!(
+        "wa_sync.group_store",
+        GroupStoreReq,
+        WithHandle<GroupStored>,
+        group_store,
+        group_store_cases
+    ),
+    op!(
+        "wa_sync.group_read",
+        GroupReadReq,
+        WithHandle<GroupPage>,
+        group_read,
+        group_read_cases
+    ),
     op!(
         "wa_sync.identity_resolve",
         ResolveReq,
@@ -3188,7 +3202,8 @@ mod tests {
                 let mut request = json!({"handle": handle, "now_ms": 0, "client_id": "c", "chat": "c", "id": "i",
                     "limit": 1, "events": [], "chats": [], "messages": [], "text": "", "max_bytes": 0,
                     "seq": 0, "items": [], "network": "wifi", "new_pn": "x",
-                    "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}});
+                    "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}, "jid": "g",
+                    "group": {"jid": "g", "subject": "", "participants": []}});
                 // A download has other outcomes than a send.
                 if spec.name == "wa_sync.media_settle" {
                     request["outcome"] = json!({"kind": "cancelled"});
@@ -3199,4 +3214,85 @@ mod tests {
         }
         handles::global().release(foreign);
     }
+}
+
+// ---- groups (E6-WA R6)
+
+#[derive(Deserialize)]
+struct GroupStoreReq {
+    handle: i64,
+    now_ms: i64,
+    /// The gateway's answer (`wa.group`).
+    group: GroupInfo,
+}
+
+fn group_store(req: GroupStoreReq) -> Result<WithHandle<GroupStored>, FfiError> {
+    with(req.handle, |store| {
+        store.group_store(&req.group, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+#[derive(Deserialize)]
+struct GroupReadReq {
+    handle: i64,
+    jid: String,
+    /// My ids (number and LID).
+    #[serde(default)]
+    own: Vec<String>,
+    /// A name or the digits of a number.
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    offset: u32,
+    limit: u32,
+}
+
+fn group_read(req: GroupReadReq) -> Result<WithHandle<GroupPage>, FfiError> {
+    with(req.handle, |store| {
+        store.group_read(
+            &req.jid,
+            &req.own,
+            req.query.as_deref(),
+            req.offset,
+            req.limit,
+        )
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+/// A group of four with me as an admin, a member known only by LID, announcement mode on.
+fn stored_group() -> Value {
+    json!({"jid": GROUP, "subject": "Aile", "announce": true, "locked": true, "size": 4,
+    "created_ms": NOW - 86_400_000, "creator": ALI,
+    "community": {"kind": "sub", "parent": "120000000000000000@g.us"},
+    "participants": [
+        {"jid": ALI, "admin": true, "role": "superadmin", "name": "Ali", "lid": ALI_LID, "pn": ALI},
+        {"jid": "100000000002@s.whatsapp.net", "admin": false, "role": "member", "name": "Bora"},
+        {"jid": "777000000000003@lid", "admin": false, "role": "member", "lid": "777000000000003@lid"},
+        {"jid": "100000000009@s.whatsapp.net", "admin": true, "role": "admin"}
+    ]})
+}
+
+fn group_store_cases() -> Vec<Case> {
+    vec![on_store(Case::new(
+        json!({"handle": H, "now_ms": NOW, "group": stored_group()}),
+    ))]
+}
+
+fn group_read_cases() -> Vec<Case> {
+    let own = json!(["100000000009@s.whatsapp.net", "777000000000009@lid"]);
+    vec![
+        on_store(Case::new(
+            json!({"handle": H, "jid": GROUP, "own": own, "limit": 100}),
+        ))
+        .after(
+            "wa_sync.group_store",
+            json!({"handle": H, "now_ms": NOW, "group": stored_group()}),
+        ),
+        on_store(Case::named(
+            "unknown",
+            json!({"handle": H, "jid": GROUP, "own": own, "limit": 100}),
+        )),
+    ]
 }

@@ -876,10 +876,10 @@ async fn groups_are_listed() {
             name: None,
             lid: None,
             pn: None,
+            role: None,
         }],
         description: Some("family".into()),
-        announce: false,
-        addressing_mode: None,
+        ..GroupInfo::default()
     };
     server.driver.set_groups(vec![group.clone()]);
     let g = gateway.clone();

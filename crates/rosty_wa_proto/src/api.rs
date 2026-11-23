@@ -37,6 +37,16 @@ pub mod routes {
     pub const CONTACTS_LOOKUP: &str = "/v1/contacts/lookup";
     pub const GROUPS: &str = "/v1/groups";
     pub const GROUP: &str = "/v1/groups/{jid}";
+    /// E6-WA R6: a change of a group (members, settings, picture, link, requests, leave). Older gateways answer 404.
+    pub const GROUP_ACTION: &str = "/v1/groups/action";
+    /// E6-WA R6: the group an invite code leads to, `?code=`.
+    pub const GROUP_INVITE: &str = "/v1/groups/invite";
+    /// E6-WA R6.
+    pub const GROUP_JOIN: &str = "/v1/groups/join";
+    /// E6-WA R6: pending join requests.
+    pub const GROUP_REQUESTS: &str = "/v1/groups/{jid}/requests";
+    /// E6-WA R6: the groups of a community.
+    pub const GROUP_SUBGROUPS: &str = "/v1/groups/{jid}/subgroups";
     pub const CALLS: &str = "/v1/calls";
     pub const CALL_ACCEPT: &str = "/v1/calls/{call_id}/accept";
     pub const CALL_REJECT: &str = "/v1/calls/{call_id}/reject";
@@ -499,7 +509,7 @@ pub struct ChatSummary {
     pub alt: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Participant {
     pub jid: String,
     pub admin: bool,
@@ -515,6 +525,10 @@ pub struct Participant {
     /// their number has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pn: Option<String>,
+    /// `superadmin`, `admin` or `member` (E6-WA R6); `admin` stays for
+    /// older apps. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// [`GroupInfo::addressing_mode`] of a group whose members WhatsApp names by
@@ -524,7 +538,7 @@ pub const ADDRESSING_PN: &str = "pn";
 /// LID.
 pub const ADDRESSING_LID: &str = "lid";
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupInfo {
     pub jid: String,
     pub subject: String,
@@ -539,6 +553,38 @@ pub struct GroupInfo {
     /// [`ADDRESSING_LID`]. Older gateways omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addressing_mode: Option<String>,
+    /// E6-WA R6 from here on; older gateways omit every field.
+    /// When the group was made (unix ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_ms: Option<i64>,
+    /// Who made it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    /// The token a description change names (the library's `description_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_id: Option<String>,
+    /// Only admins edit the subject, description and picture.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// New members need an admin's approval.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approval: bool,
+    /// Only admins add members.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admins_add: bool,
+    /// The disappearing timer in seconds; none when off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_s: Option<u32>,
+    /// How many members WhatsApp counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
+    /// Its place in a community.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub community: Option<crate::group::CommunityRef>,
+    /// I left or was removed: the rest is what was known before, members
+    /// may be empty.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub left: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1026,10 +1072,10 @@ mod tests {
                     name: None,
                     lid: None,
                     pn: None,
+                    role: None,
                 }],
-                description: None,
-                announce: false,
                 addressing_mode: None,
+                ..GroupInfo::default()
             },
             r#"{"jid":"1-2@g.us","subject":"Aile","participants":[{"jid":"905550000001@s.whatsapp.net","admin":true}]}"#,
         )]);
@@ -1156,6 +1202,7 @@ mod tests {
                         name: Some("Ada".into()),
                         lid: Some("1@lid".into()),
                         pn: Some("905550000001@s.whatsapp.net".into()),
+                        role: None,
                     },
                     // A member who hides their number: a LID and nothing else.
                     Participant {
@@ -1164,11 +1211,11 @@ mod tests {
                         name: None,
                         lid: Some("2@lid".into()),
                         pn: None,
+                        role: None,
                     },
                 ],
-                description: None,
-                announce: false,
                 addressing_mode: Some(ADDRESSING_LID.into()),
+                ..GroupInfo::default()
             },
             r#"{"jid":"1-2@g.us","subject":"Aile","participants":[{"jid":"905550000001@s.whatsapp.net","admin":false,"name":"Ada","lid":"1@lid","pn":"905550000001@s.whatsapp.net"},{"jid":"2@lid","admin":false,"lid":"2@lid"}],"addressing_mode":"lid"}"#,
         )]);

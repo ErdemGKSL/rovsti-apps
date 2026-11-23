@@ -533,6 +533,13 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (instance_id, chat, id, voter)
     );
     ",
+    // v13: groups (E6-WA R6). When I left a group or was removed from it
+    // (`chat_settings.left_ms`, NULL while I am a member): the chat stays
+    // readable and `ChatMeta.left` tells the apps; a join or an add clears
+    // it. Only a new nullable column: every row stays.
+    "
+    ALTER TABLE chat_settings ADD COLUMN left_ms INTEGER;
+    ",
 ];
 
 /// The public half of an app install's push key, as stored (round 7b).
@@ -2999,6 +3006,29 @@ mod tests {
             .expect("mine");
         assert_eq!(info.members[0].read_ms, Some(70));
         assert_eq!(info.members[0].delivered_ms, Some(70));
+    }
+
+    #[tokio::test]
+    async fn leaving_a_group_is_remembered_until_i_am_back() {
+        let store = store_with_instance().await;
+        let group = "120363000000000011@g.us";
+        let set = |left, at| store.set_group_left(id(1), group.into(), left, at);
+        let meta = set(true, 100).await.unwrap().expect("left");
+        assert!(meta.left);
+        assert!(set(true, 150).await.unwrap().is_none());
+        assert!(store.group_left(id(1), group.into()).await.unwrap());
+        // An add older than the removal does not bring me back.
+        assert!(set(false, 90).await.unwrap().is_none());
+        assert!(store.group_left(id(1), group.into()).await.unwrap());
+        // Other settings keep it.
+        store
+            .change_chat(id(1), group.into(), ChatChange::Pinned(true))
+            .await
+            .unwrap();
+        assert!(store.group_left(id(1), group.into()).await.unwrap());
+        let back = set(false, 200).await.unwrap().expect("back");
+        assert!(!back.left);
+        assert!(!store.group_left(id(1), group.into()).await.unwrap());
     }
 
     #[tokio::test]

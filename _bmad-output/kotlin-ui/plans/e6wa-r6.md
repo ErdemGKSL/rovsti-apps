@@ -179,4 +179,44 @@ Edge cases and the tests that cover them:
 
 ## Evidence
 
-Filled in when the round closes.
+Branch `worktree-agent-ae71b6859694231d0`, from `messages-kotlin` at `0a277191`.
+
+| Step | Commit(s) |
+|---|---|
+| Plan | `69011dc7` |
+| 1 R5 follow-ups (tile disk cache, cleared with the link) | `03252166` |
+| 2 `rosty_core::wa_group` | `e0f4a8ce` |
+| 3 proto and client | `8a4e0612` |
+| 4 Gateway, schema **v13** (deploy) | `d6ebd16c` |
+| 5 `wa_sync` **v8** | `d367c6d6` |
+| 6 FFI, fixtures, `OPS.md`, bridge | `fc76985c`, `600c9c3a`, `1b0380e8` |
+| 7 Messages UI, strings, goldens | `5d43f75f`, `3cf4fcdb` |
+
+Checks (host Rust with `--profile checks`, Gradle Release tasks only, plain flavor for screenshots):
+- Rust package set (`rosty_core`, `rosty_app_core`, `rosty_geo`, `rosty_tiles`, `rosty_wa_proto`, `rosty_wa_client`,
+  `rosty_android`, `rosty_ffi`, `wa_gateway`): fmt, clippy (no new warning; the old dead code in
+  `rosty_app_core/src/cards/model.rs` still fails `-D warnings`) and 2328 tests pass; `cargo check --release -p
+  rosty_android --target aarch64-linux-android` passes. New tests: `wa_group` 25, gateway `tests/groups.rs` 6 plus the
+  store and pure tests (left flag, notices, refusal mapping), `wa_sync::groups_tests` 6 (incl. the v7 to v8 migration),
+  `rosty_wa_proto::group` 3, client 1.
+- Gradle: Messages `testPlainReleaseUnitTest` 701 (incl. `WaGroupModelTest` 6 and the R6 shots), `testFirebaseReleaseUnitTest` 701,
+  `lintPlainRelease`, `verifyRoborazziPlainRelease`; `:core-bridge` 140 tests (contract fixtures of every new op) and lint;
+  `:design` 404 tests (ConventionTest); `spotlessCheck`; no orphan Messages goldens.
+- New goldens, light and dark: `wa-r6-info-admin`, `wa-r6-info-member`, `wa-r6-info-left`, `wa-r6-add-members`,
+  `wa-r6-add-results`, `wa-r6-invite-link`, `wa-r6-join-preview`, `wa-r6-join-invalid`, `wa-r6-new-group`,
+  `wa-r6-announcement-thread` (notice lines and the announcement-mode composer).
+
+Deviations from the plan:
+- WhatsApp refusals answer 409 `conflict` rather than 403 (the wire has no forbidden code; a new one would not be
+  additive). An older gateway's 404 reads as "update the gateway".
+- My own actions through the gateway leave no line of their own: the lines come from WhatsApp's notifications (needs a
+  device check that WhatsApp echoes them to the acting account).
+- The member order on the device sorts by the WhatsApp name the store keeps; the page shows the address-book name.
+- "Add Members" and "New Group" pick from contacts and typed numbers (New Message's search), not from WhatsApp chats.
+- Join requests: a tap approves; reject is the row's long press and its accessibility action.
+- `CLAUDE.md` still says the place tiles are kept in memory only: left to the owner (an agent does not edit it).
+
+Needs a device: every admin action against a real group (results per person, the invite message for a privacy
+refusal, the 640 px picture), a link reset and the old link, joining a group that needs approval, a removal while the
+info page is open, the notice lines of each WhatsApp notification (and whether my own changes come back as lines), a
+community announcement group as a member, a group of 1000+ members.

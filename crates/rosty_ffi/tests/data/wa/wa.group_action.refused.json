@@ -1,0 +1,18 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/groups/action",
+  "body": {
+   "group": "120363000000000071@g.us",
+   "action": {
+    "type": "announce",
+    "on": true
+   }
+  }
+ },
+ "status": 409,
+ "body": {
+  "code": "conflict",
+  "message": "WhatsApp refused the change (403)"
+ }
+}

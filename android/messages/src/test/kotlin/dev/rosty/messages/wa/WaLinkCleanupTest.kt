@@ -93,6 +93,12 @@ class WaLinkCleanupTest {
                 core = container.fakeRust,
             )
         runBlocking { container.store.load() }
+        // The place cards' tile cache (R6 owner decision): a bounded disk cache that goes with the link.
+        val tiles = java.io.File(app.cacheDir, dev.rosty.messages.wa.rich.PlaceMaps.DIR)
+        java.io
+            .File(tiles, "osm/14/1/2.pbf")
+            .apply { parentFile!!.mkdirs() }
+            .writeBytes(byteArrayOf(1, 2, 3))
         assertTrue(notify(ada))
         assertTrue(notify(sms))
         assertTrue(remind(41, ada, "A1"))
@@ -111,10 +117,37 @@ class WaLinkCleanupTest {
         assertTrue(runBlocking { container.store.flush() })
         assertEquals(mapOf(sms to "ok"), core.drafts)
         assertEquals(listOf(sms), core.prefs.muted)
+        assertFalse(tiles.exists())
 
         // Again (the store may say it twice): nothing more changes.
         runBlocking { messagesLinkCleanup(container).forget("inst1") }
         assertEquals(mapOf(sms to "ok"), container.store.drafts.value)
         assertEquals(setOf(sms), tags())
+    }
+
+    @Test fun placeTilesOpenAsABoundedDiskCacheUnderTheCacheDirectory() {
+        val dir = java.io.File(app.cacheDir, dev.rosty.messages.wa.rich.PlaceMaps.DIR)
+        val maps =
+            dev.rosty.messages.wa.rich.PlaceMaps(dir, staticMap = {
+                dev.rosty.core.Outcome
+                    .Err(
+                        dev.rosty.core.RustError
+                            .NotFound("map"),
+                    )
+            })
+        val request = maps.openRequest()
+        assertEquals(dir.absolutePath, request.dir)
+        assertFalse(request.memory)
+        assertEquals(20L * 1024 * 1024, request.cacheCap)
+        // Without a directory (tests) nothing is written.
+        val memory =
+            dev.rosty.messages.wa.rich.PlaceMaps(null, staticMap = {
+                dev.rosty.core.Outcome
+                    .Err(
+                        dev.rosty.core.RustError
+                            .NotFound("map"),
+                    )
+            })
+        assertTrue(memory.openRequest().memory)
     }
 }

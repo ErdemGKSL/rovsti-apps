@@ -104,6 +104,32 @@ interface WaRemote {
     /** A group with its members (the `@` list of the composer). */
     suspend fun group(jid: String): Outcome<GroupInfo> = Outcome.Err(RustError.Unsupported("group"))
 
+    /** E6-WA R6: a change of a group (members, settings, picture, link, requests, leave). */
+    suspend fun groupAction(
+        group: String,
+        action: dev.rosty.core.model.wa.GroupActionKind,
+    ): Outcome<dev.rosty.core.model.wa.GroupActionDone> = Outcome.Err(RustError.Unsupported("group action"))
+
+    /** E6-WA R6: creates a group. */
+    suspend fun createGroup(req: dev.rosty.core.model.wa.CreateGroup): Outcome<dev.rosty.core.model.wa.GroupCreated> =
+        Outcome.Err(RustError.Unsupported("create group"))
+
+    /** E6-WA R6: the group an invite link leads to. */
+    suspend fun invitePreview(code: String): Outcome<dev.rosty.core.model.wa.InvitePreview> =
+        Outcome.Err(RustError.Unsupported("invite preview"))
+
+    /** E6-WA R6: joins a group with an invite link. */
+    suspend fun joinGroup(code: String): Outcome<dev.rosty.core.model.wa.GroupJoined> =
+        Outcome.Err(RustError.Unsupported("join group"))
+
+    /** E6-WA R6: the pending join requests of a group. */
+    suspend fun joinRequests(jid: String): Outcome<List<dev.rosty.core.model.wa.JoinRequest>> =
+        Outcome.Err(RustError.Unsupported("join requests"))
+
+    /** E6-WA R6: a community's groups. */
+    suspend fun subgroups(jid: String): Outcome<List<dev.rosty.core.model.wa.Subgroup>> =
+        Outcome.Err(RustError.Unsupported("subgroups"))
+
     /** "typing…" to the other side; best effort. */
     suspend fun typing(
         chat: String,
@@ -326,6 +352,21 @@ class GatewayWaRemote(
     ): Outcome<MessageReceipts> = call { it.messageReceipts(chat, messageId) }
 
     override suspend fun group(jid: String): Outcome<GroupInfo> = call { it.group(jid) }
+
+    override suspend fun groupAction(
+        group: String,
+        action: dev.rosty.core.model.wa.GroupActionKind,
+    ) = call { it.groupAction(group, action) }
+
+    override suspend fun createGroup(req: dev.rosty.core.model.wa.CreateGroup) = call { it.createGroup(req) }
+
+    override suspend fun invitePreview(code: String) = call { it.invitePreview(code) }
+
+    override suspend fun joinGroup(code: String) = call { it.joinGroup(code) }
+
+    override suspend fun joinRequests(jid: String) = call { it.joinRequests(jid) }
+
+    override suspend fun subgroups(jid: String) = call { it.subgroups(jid) }
 
     override suspend fun typing(
         chat: String,

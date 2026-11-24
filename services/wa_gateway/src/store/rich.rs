@@ -674,8 +674,8 @@ pub(super) fn write_settings(
 fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<ChatMeta, StoreError> {
     let settings = conn
         .query_row(
-            "SELECT archived, pinned, muted_until_ms, marked_unread, ephemeral_s FROM chat_settings
-             WHERE instance_id = ?1 AND jid = ?2",
+            "SELECT archived, pinned, muted_until_ms, marked_unread, ephemeral_s, left_ms
+             FROM chat_settings WHERE instance_id = ?1 AND jid = ?2",
             params![instance.as_str(), jid],
             |r| {
                 Ok((
@@ -684,6 +684,7 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
                     r.get::<_, Option<i64>>(2)?,
                     r.get::<_, bool>(3)?,
                     r.get::<_, Option<u32>>(4)?,
+                    r.get::<_, Option<i64>>(5)?,
                 ))
             },
         )
@@ -700,7 +701,7 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
             },
         )
         .optional()?;
-    let (archived, pinned, muted_until_ms, marked_unread, ephemeral_s) =
+    let (archived, pinned, muted_until_ms, marked_unread, ephemeral_s, left_ms) =
         settings.unwrap_or_default();
     let (picture_id, push_name) = profile.unwrap_or_default();
     Ok(ChatMeta {
@@ -711,6 +712,7 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
         muted_until_ms,
         marked_unread,
         ephemeral_s: ephemeral_s.filter(|t| *t > 0),
+        left: left_ms.is_some(),
     })
 }
 
@@ -1302,7 +1304,7 @@ impl Store {
                 )?;
                 tx.execute(
                     "DELETE FROM chat_settings WHERE instance_id = ?1 AND jid = ?2
-                        AND ephemeral_s IS NULL AND ephemeral_ms IS NULL",
+                        AND ephemeral_s IS NULL AND ephemeral_ms IS NULL AND left_ms IS NULL",
                     params![instance.as_str(), jid],
                 )?;
             } else {
@@ -1690,6 +1692,46 @@ impl Store {
             let after = chat_meta(&tx, &instance, &jid)?;
             tx.commit()?;
             Ok((after.ephemeral_s != before.ephemeral_s).then_some(after))
+        })
+        .await
+    }
+
+    /// Whether I left the group `jid` or was removed from it (E6-WA R6).
+    pub async fn group_left(&self, instance: InstanceId, jid: String) -> Result<bool, StoreError> {
+        self.run(move |conn| Ok(chat_meta(conn, &instance, &jid)?.left))
+            .await
+    }
+
+    /// Records that I left the group `jid` (or was removed) as of `at_ms`,
+    /// or that I am a member again. A change older than the stored leave
+    /// does not bring me back. Returns the new [`ChatMeta`] when it changed.
+    pub async fn set_group_left(
+        &self,
+        instance: InstanceId,
+        jid: String,
+        left: bool,
+        at_ms: i64,
+    ) -> Result<Option<ChatMeta>, StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let before = chat_meta(&tx, &instance, &jid)?;
+            if left {
+                tx.execute(
+                    "INSERT INTO chat_settings (instance_id, jid, left_ms) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(instance_id, jid) DO UPDATE SET left_ms = excluded.left_ms
+                     WHERE left_ms IS NULL",
+                    params![instance.as_str(), jid, at_ms],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE chat_settings SET left_ms = NULL
+                     WHERE instance_id = ?1 AND jid = ?2 AND left_ms <= ?3",
+                    params![instance.as_str(), jid, at_ms],
+                )?;
+            }
+            let after = chat_meta(&tx, &instance, &jid)?;
+            tx.commit()?;
+            Ok((after.left != before.left).then_some(after))
         })
         .await
     }

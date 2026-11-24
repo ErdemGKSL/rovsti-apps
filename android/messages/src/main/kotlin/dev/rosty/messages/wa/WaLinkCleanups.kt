@@ -19,7 +19,8 @@ import dev.rosty.wa.WaRepository
  * 4. the reminders set on messages of the chats;
  * 5. the scheduled WhatsApp texts in memory (the gateway dropped its rows with the account);
  * 6. the names WhatsApp answered for numbers (`wa-live-names.json`);
- * 7. the thumbnails in memory (their files went with the media directory).
+ * 7. the thumbnails in memory (their files went with the media directory);
+ * 8. the cached map tiles and pictures of place cards (`cacheDir/wa-place-tiles`, R6 owner decision).
  *
  * [WaOffline] itself deletes the media directory and resets the [WaRekeys] cursor of the instance. Not touched:
  * what is not per chat or per account (the recent reaction emoji, the voice note speed, the quick replies), and
@@ -37,6 +38,7 @@ fun messagesLinkCleanup(container: MessagesContainer): WaLinkCleanup {
         container.scheduleIfMade?.forgetWhatsApp()
         container.liveWaNames.forget()
         container.waMediaIfMade?.forgetThumbs()
+        container.placeMaps?.forget()
         // The WhatsApp drafts in memory (`plans/wa-vault.md` 13.5).
         container.waDrafts.clear()
     }

@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -252,7 +252,42 @@ CREATE TABLE pending_meta (
 ) WITHOUT ROWID;
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7];
+/// v8: groups (E6-WA R6).
+///
+/// `groups`: what the gateway answered for a group (subject, description, creation, settings, timer, size, its
+/// place in a community) and `gone` (I left it or was removed); `fetched_ms` 0 for a group known only from a
+/// notice line or the left flag. `group_members`: its members by the id the gateway lists them under, their other
+/// id, role and WhatsApp name. A notice line newer than the fetch merges into the members. Only new tables.
+const V8: &str = "
+CREATE TABLE groups (
+    jid TEXT PRIMARY KEY,
+    subject TEXT,
+    description TEXT,
+    description_id TEXT,
+    created_ms INTEGER,
+    creator TEXT,
+    announce INTEGER NOT NULL DEFAULT 0,
+    locked INTEGER NOT NULL DEFAULT 0,
+    approval INTEGER NOT NULL DEFAULT 0,
+    admins_add INTEGER NOT NULL DEFAULT 0,
+    gone INTEGER NOT NULL DEFAULT 0,
+    ephemeral_s INTEGER,
+    size INTEGER,
+    community_kind TEXT,
+    community_parent TEXT,
+    fetched_ms INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
+CREATE TABLE group_members (
+    group_jid TEXT NOT NULL,
+    jid TEXT NOT NULL,
+    alt TEXT,
+    role TEXT NOT NULL DEFAULT 'member',
+    name TEXT,
+    PRIMARY KEY (group_jid, jid)
+) WITHOUT ROWID;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7, V8];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

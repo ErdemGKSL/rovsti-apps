@@ -218,7 +218,30 @@ shows only who types or records; a hidden last seen is `none`). Store: `wa_sync.
 quoted_id?}` (shown at once as a poll, place or card row) and `{kind: "poll_vote", message_id, options}` (my choice shows at once; a refused
 vote shows the one before; a choice the poll does not allow, or a message that is no poll, is refused). Rows carry `poll?`, `contacts` and
 `kept` (a kept row has no `expires_at`); `kind` gains `poll`. Tiles: `tiles.open` takes `memory: true` (tiles kept in memory only, no
-file written; Messages' place cards).
+file written; Messages' place cards; since R6 Messages opens a bounded disk cache in `cacheDir/wa-place-tiles` instead, deleted with the
+WhatsApp data).
+
+Groups (E6-WA R6, `rosty_core::wa_group`). Gateway: `wa.group_action {handle, group, action}` answers `{results?, link?}`; `action` is
+`{type: add | remove | promote | demote | approve | reject, participants}` (one `{jid, error?, invite? {code, expiration}}` per person),
+`{type: "subject", subject}`, `{type: "description", description}` (empty deletes), `{type: "picture", jpeg_b64?}`, `{type: "announce" |
+"locked" | "approval", on}`, `{type: "invite_link", reset}` (answers `link`), `{type: "send_invite", to, code, expiration}` or `{type:
+"leave"}`, checked first (an empty list, a subject over 100 or a description over 2048 characters, a picture over 1 MiB are `invalid`
+without a request); WhatsApp's refusal (not an admin, demoted meanwhile) is `conflict`; an older gateway `not_found`. `wa.group_create
+{handle, subject, participants}` answers `{jid, results}`; `wa.group_invite_preview {handle, code}` (a link or a code) answers `{jid, subject,
+size?, description?, approval, community?}` (`not_found` for a reset or unknown code); `wa.group_join {handle, code}` answers `{jid,
+pending}`; `wa.group_requests {handle, jid}` answers `{requests: [{jid, jid_alt?, requested_ms?}]}`; `wa.group_subgroups {handle, jid}`
+answers `{groups: [{jid, subject, size?, announcement, general}]}`. `wa.group` gains `created_ms?`, `creator?`, `description_id?`, `locked`,
+`approval`, `admins_add`, `ephemeral_s?`, `size?`, `community? {kind, parent?}`, `left` and each participant's `role`; chat meta gains
+`left`; `system` gains `{type: "group", action, by?, participants, value?}`. Pure: `wa.group_notice {note, own}` answers `{template, actor:
+{type: me | someone | nobody, jid?}, targets: [{jid, me}], more, value?, about_me}` (a removal of oneself is `left`, an add of oneself
+`joined`, at most three people named); `wa.invite_find {text}` answers `{found? {code, start, end}, code?}` (`start`/`end` in UTF-16);
+`wa.group_results {kind, results}` answers `{done, problems: [{jid, outcome, code?}], invites}` (`outcome` one of `invite_instead`,
+`privacy`, `not_on_whatsapp`, `already`, `full`, `left_recently`, `not_allowed`, `failed`); `wa.group_can {me, target, action}` answers
+`{allowed}`. Store (schema v8, tables `groups` and `group_members`): `wa_sync.group_store {handle, now_ms, group}` keeps the answer of
+`wa.group` and answers `{handle, members}`; `wa_sync.group_read {handle, jid, own, query?, offset?, limit}` answers `{handle, group?,
+members: [{jid, alt?, role, name?}], total, admins, view: {my_role?, abilities: {send, edit_info, add, manage, settings, invite_link,
+requests, leave}, last_admin, announce_only}}` (me first, admins, then by name; at most 500 a page). A group notice line newer than the
+fetch moves the stored members and settings; `chat_meta {left}` marks the group left.
 People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key, home_cc?}` (a number in any spelling, phone JID, LID JID or bare LID; a number is read by the one number rule, `caller_id::e164_of`, so a national spelling needs the home calling code `home_cc` and `people.upsert` takes `home_cc?` for its `number`s too; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
 
 People sync v2 (`rosty_app_core::people_sync`, plan `_bmad-output/plans/people-sync-v2.md`): `people.sync_begin
@@ -552,8 +575,15 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.send_rich` | - | wa | op | wa.send_rich |
 | `(wa) wa.poll_vote` | - | wa | op | wa.poll_vote |
 | `(wa) wa.unsubscribe_presence` | - | wa | op | wa.unsubscribe_presence |
+| `(wa) wa.group_action` | - | wa | op | wa.group_action |
+| `(wa) wa.group_create` | - | wa | op | wa.group_create |
+| `(wa) wa.group_invite_preview` | - | wa | op | wa.group_invite_preview |
+| `(wa) wa.group_join` | - | wa | op | wa.group_join |
+| `(wa) wa.group_requests` | - | wa | op | wa.group_requests |
+| `(wa) wa.group_subgroups` | - | wa | op | wa.group_subgroups |
 | `rosty_core::wa_actions` | messages | wa | op | wa.mention_query, wa.mention_encode, wa.link_find, wa.link_parse, wa.receipt_sections |
 | `rosty_core::wa_rich` | messages | wa | op | wa.poll_check, wa.poll_view, wa.vcard_parse, wa.vcard_build, wa.place_view, wa.static_map, wa.presence_view |
+| `rosty_core::wa_group` | messages | wa | op | wa.group_notice, wa.invite_find, wa.group_results, wa.group_can |
 | `rosty_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rosty_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
 | `rosty_app_core::contacts::whatsapp` | contacts | wa | op | wa.target, contacts.wa_marks, contacts.wa_card, contacts.wa_profile_lines |
@@ -565,7 +595,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.expire, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.expire, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.group_store, wa_sync.group_read, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
 | `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.unlock_link, vault.unlock_stay, vault.daily_store, vault.daily_forget, vault.stay_store, vault.stay_forget, vault.stay_prepare, vault.touch, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |

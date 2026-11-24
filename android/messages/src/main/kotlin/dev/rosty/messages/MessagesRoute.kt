@@ -51,6 +51,12 @@ sealed interface MessagesRoute {
         val share: List<String> = emptyList(),
     ) : MessagesRoute
 
+    /** E6-WA R6: the info page of the WhatsApp group [jid] (members, settings, invite link). */
+    @Serializable
+    data class WaGroupInfo(
+        val jid: String,
+    ) : MessagesRoute
+
     /** New conversation: a number or a contact, by SMS or WhatsApp. [share] carries a share-in to send. */
     @Serializable
     data class NewConversation(
@@ -171,7 +177,9 @@ fun chromeFor(
             ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.tab_settings)))
         }
 
-        is MessagesRoute.SmsThread, is MessagesRoute.WaThread, is MessagesRoute.NewConversation -> {
+        is MessagesRoute.SmsThread, is MessagesRoute.WaThread, is MessagesRoute.NewConversation,
+        is MessagesRoute.WaGroupInfo,
+        -> {
             ChromeSpec(TabBarMode.Hidden)
         }
 

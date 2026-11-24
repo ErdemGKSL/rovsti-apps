@@ -9,13 +9,15 @@ use std::time::Duration;
 use rosty_wa_proto::api::routes;
 use rosty_wa_proto::{
     ApiError, CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey,
-    CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, ForwardMessage,
-    GatewayUrl, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
-    LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions,
-    MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart, PlaceCall, PollVote,
-    ProfilesRequest, PushKeyedRegistration, PushRegistration, RevokeMessage, RichChat, RichMessage,
-    ScheduleText, ScheduledText, SendReaction, SendRich, SendText, Sent, SetMuted, SetPresence,
-    StarMessage, StatusList, SubscribePresence, UnsubscribePresence, WaMessage, WaProfile, WaUser,
+    CreateGroup, CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode,
+    ForwardMessage, GatewayUrl, GroupAction, GroupActionDone, GroupCreated, GroupInfo, GroupJoined,
+    IdentityMappings, InstanceStatus, InvitePreview, IssuedKey, JoinGroup, JoinRequest, KeyInfo,
+    LinkRequest, LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptionError,
+    MediaOptions, MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart,
+    PlaceCall, PollVote, ProfilesRequest, PushKeyedRegistration, PushRegistration, RevokeMessage,
+    RichChat, RichMessage, ScheduleText, ScheduledText, SendReaction, SendRich, SendText, Sent,
+    SetMuted, SetPresence, StarMessage, StatusList, Subgroup, SubscribePresence,
+    UnsubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -100,6 +102,11 @@ pub(crate) fn receipts_path(chat: &str, message_id: &str) -> String {
         routes::fill(routes::MESSAGE_RECEIPTS, "message_id", message_id),
         enc(chat)
     )
+}
+
+/// `GET /v1/groups/invite?code=` (E6-WA R6).
+pub(crate) fn invite_path(code: &str) -> String {
+    format!("{}?code={}", routes::GROUP_INVITE, enc(code))
 }
 
 pub(crate) fn send_media_path(
@@ -812,6 +819,60 @@ impl Gateway {
         self.get(&receipts_path(chat, message_id))
     }
 
+    /// Changes a group (E6-WA R6): members (one result per person), subject,
+    /// description, picture, settings, the invite link, join requests, an
+    /// invite message, or leaving it. The action is checked first (empty
+    /// lists, subject and description lengths, the picture size). An older
+    /// gateway answers `NotFound`.
+    pub fn group_action(&self, req: &GroupAction) -> Result<GroupActionDone, ClientError> {
+        let action = req
+            .action
+            .checked()
+            .map_err(|e| ClientError::Api(ApiError::new(ErrorCode::BadRequest, e.to_string())))?;
+        self.post(
+            routes::GROUP_ACTION,
+            &GroupAction {
+                group: req.group.clone(),
+                action,
+            },
+        )
+    }
+
+    /// Creates a group with `participants` (E6-WA R6).
+    pub fn create_group(&self, req: &CreateGroup) -> Result<GroupCreated, ClientError> {
+        let req = req
+            .checked()
+            .map_err(|e| ClientError::Api(ApiError::new(ErrorCode::BadRequest, e.to_string())))?;
+        self.post(routes::GROUPS, &req)
+    }
+
+    /// The group an invite code (or link) leads to, without joining (E6-WA
+    /// R6). `NotFound` for an unknown or reset code.
+    pub fn invite_preview(&self, code: &str) -> Result<InvitePreview, ClientError> {
+        self.get(&invite_path(code))
+    }
+
+    /// Joins with an invite code (E6-WA R6); `pending` when an admin must
+    /// approve.
+    pub fn join_group(&self, code: &str) -> Result<GroupJoined, ClientError> {
+        self.post(
+            routes::GROUP_JOIN,
+            &JoinGroup {
+                code: code.to_owned(),
+            },
+        )
+    }
+
+    /// The pending join requests of a group I administer (E6-WA R6).
+    pub fn join_requests(&self, jid: &str) -> Result<Vec<JoinRequest>, ClientError> {
+        self.get(&routes::fill(routes::GROUP_REQUESTS, "jid", jid))
+    }
+
+    /// The groups of the community `jid` (its parent group), E6-WA R6.
+    pub fn subgroups(&self, jid: &str) -> Result<Vec<Subgroup>, ClientError> {
+        self.get(&routes::fill(routes::GROUP_SUBGROUPS, "jid", jid))
+    }
+
     /// Archives, pins, mutes or marks a chat on every device. A `chat_meta`
     /// event follows.
     pub fn chat_action(&self, req: &ChatAction) -> Result<(), ClientError> {
@@ -1076,6 +1137,11 @@ mod tests {
         let local = GatewayUrl::parse("http://10.0.2.2:8787").unwrap();
         let req = request(Method::GET, &local, "/v1/chats?x=1", None, ()).unwrap();
         assert_eq!(req.uri().to_string(), "http://10.0.2.2:8787/v1/chats?x=1");
+    }
+
+    #[test]
+    fn invite_path_encodes_the_code() {
+        assert_eq!(invite_path("AbC/1"), "/v1/groups/invite?code=AbC%2F1");
     }
 
     #[test]

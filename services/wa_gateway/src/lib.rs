@@ -10,6 +10,7 @@ pub mod cooldown;
 pub mod driver;
 pub mod error;
 pub mod expiry;
+pub mod group_routes;
 pub mod hub;
 pub mod media_cache;
 pub mod people_job;

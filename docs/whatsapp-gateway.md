@@ -709,6 +709,33 @@ new table. An older gateway refuses a v12 file, so back it up before the deploy
 (`sqlite3 gateway.db ".backup gateway-v11.db"`). A chat merge moves its votes, a
 person merge rewrites their voter id, and another account on the instance wipes them.
 
+### Groups (E6-WA R6)
+
+| Request | Body | Notes |
+| --- | --- | --- |
+| `GET /v1/groups/{jid}` | | Also `created_ms`, `creator`, `description_id`, `locked`, `approval`, `admins_add`, `ephemeral_s`, `size`, `community {kind: parent, announcement, general or sub, parent?}`, each participant's `role` (`superadmin`, `admin`, `member`) and `left`. A group WhatsApp refuses to show (403 or 404) that I left answers `{jid, left: true}` with no members |
+| `POST /v1/groups/action` | `{group, action}` | Answers `{results?, link?}`. `action` is `{"type": "add" \| "remove" \| "promote" \| "demote" \| "approve" \| "reject", participants}` (1 to 256; one `{jid, error?, invite?: {code, expiration}}` per person, `error` WhatsApp's code: 403 privacy, with an invite code when the adder may send one), `subject {subject}` (1 to 100 characters), `description {description}` (up to 2048; empty deletes), `picture {jpeg_b64?}` (up to 1 MiB; none removes), `announce {on}`, `locked {on}`, `approval {on}`, `invite_link {reset}` (answers `link`), `send_invite {to, code, expiration}` (WhatsApp's group invite message), `leave`. 400 for what WhatsApp would refuse anyway; 409 `conflict` when WhatsApp refuses (not an admin, not a member, the description changed elsewhere) |
+| `POST /v1/groups` | `{subject, participants}` | Creates a group. Answers `{jid, results}`: the people asked for that WhatsApp did not list as members |
+| `GET /v1/groups/invite?code=` | | The group a link (or a bare code) leads to: `{jid, subject, size?, description?, approval, community?}`. 404 for an unknown or reset code, 400 for something that is no WhatsApp invite |
+| `POST /v1/groups/join` | `{code}` | `{jid, pending}`; `pending` when an admin must approve |
+| `GET /v1/groups/{jid}/requests` | | Pending join requests `[{jid, jid_alt?, requested_ms?}]` |
+| `GET /v1/groups/{jid}/subgroups` | | A community's groups `[{jid, subject, size?, announcement, general}]`, the announcement group first |
+
+- **Notice lines**: every group notification (`w:gp2`, one `GroupUpdate` per action) that
+  has a line is stored as a message with `meta.system {type: "group", action, by?,
+  participants, value?}` (id `<notification id>-<action index>`, so a repeat keeps one
+  line); a group's picture change (`PictureUpdate` with an author) too. People are named
+  by number when known, else by LID; `by` is `me` for my own changes. The timer keeps its
+  own line (R4).
+- **Leaving**: `leave` through the route, a notification that removes me, or the group
+  deleted sets `chat_settings.left_ms` and announces `chat_meta {left: true}`; an add of
+  me, or a join through the route, clears it. Nothing is deleted.
+- **Communities** are read-only: no community admin routes.
+
+Store schema **v13** adds `chat_settings.left_ms`. Only a new nullable column; an older
+gateway refuses a v13 file, so back it up before the deploy (`sqlite3 gateway.db
+".backup gateway-v12.db"`).
+
 ## Profiles and profile pictures
 
 `POST /v1/contacts/profiles` with `{"jids": [...], "refresh": false}` (1 to 50 user

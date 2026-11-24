@@ -41,6 +41,8 @@ import dev.rosty.messages.R
 import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.MessagesAvatar
+import dev.rosty.messages.wa.group.presentJoinWithLink
+import dev.rosty.messages.wa.group.presentNewGroup
 import dev.rosty.platform.identity.PhoneNumbers
 import kotlinx.collections.immutable.persistentListOf
 
@@ -83,6 +85,7 @@ fun NewConversationPage(
     val state by model.state.collectAsState()
     val field = rememberTextFieldState()
     val overlays = LocalOverlay.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(field) { snapshotFlow { field.text.toString() }.collect(model::setQuery) }
     LaunchedEffect(model) {
         model.effects.collect { effect ->
@@ -116,7 +119,20 @@ fun NewConversationPage(
             }
         }
     }
-    NewConversationScreen(state, field, share = route.share != null, onBack = onBack, onPick = model::pick)
+    val groups =
+        route.share == null &&
+            container.wa.linkState
+                .collectAsState()
+                .value is dev.rosty.wa.WaLinkState.Connected
+    NewConversationScreen(
+        state,
+        field,
+        share = route.share != null,
+        onBack = onBack,
+        onPick = model::pick,
+        onNewGroup = { overlays.presentNewGroup(res, container, scope, navigator) }.takeIf { groups },
+        onJoinGroup = { overlays.presentJoinWithLink(res, container, navigator) }.takeIf { groups },
+    )
 }
 
 /** The stateless page: the field, then the options (typed number first, then contacts). */
@@ -127,6 +143,9 @@ fun NewConversationScreen(
     share: Boolean,
     onBack: () -> Unit,
     onPick: (RecipientOption) -> Unit,
+    /** E6-WA R6: "New Group" and "Join Group with Link" (WhatsApp linked); null: not offered. */
+    onNewGroup: (() -> Unit)? = null,
+    onJoinGroup: (() -> Unit)? = null,
 ) {
     val title = stringResource(if (share) R.string.new_share_title else R.string.new_conversation_title)
     ScreenLazyPage(
@@ -145,6 +164,36 @@ fun NewConversationScreen(
                 stringResource(R.string.new_field),
                 Modifier.padding(horizontal = Spacing.gutter, vertical = Spacing.s).testTag(NewConversationTags.Field),
             )
+        }
+        // E6-WA R6: a new WhatsApp group, or one joined with a pasted link.
+        if (onNewGroup != null && onJoinGroup != null && state.query.isBlank()) {
+            item(key = "new-group", contentType = "group") {
+                ListRow(
+                    title = stringResource(R.string.wa_group_new),
+                    modifier = Modifier.testTag(NewConversationTags.option("new-group")),
+                    leading = {
+                        dev.rosty.design.icons.RostyIcon(
+                            RostyIcons.People,
+                            null,
+                            tint = dev.rosty.design.theme.RostyTheme.colors.accent,
+                        )
+                    },
+                    onClick = onNewGroup,
+                )
+                RowSeparator(inset = TextStartWithLeading)
+                ListRow(
+                    title = stringResource(R.string.wa_group_join_with_link),
+                    modifier = Modifier.testTag(NewConversationTags.option("join-group")),
+                    leading = {
+                        dev.rosty.design.icons.RostyIcon(
+                            RostyIcons.Share,
+                            null,
+                            tint = dev.rosty.design.theme.RostyTheme.colors.accent,
+                        )
+                    },
+                    onClick = onJoinGroup,
+                )
+            }
         }
         if (state.options.isEmpty() && state.query.isNotBlank()) {
             item(key = "empty", contentType = "empty") {

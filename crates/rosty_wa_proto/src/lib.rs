@@ -10,6 +10,7 @@ pub mod api;
 pub mod audio;
 pub mod call;
 pub mod event;
+pub mod group;
 pub mod history;
 pub mod identity;
 pub mod key;
@@ -32,6 +33,11 @@ pub use call::{
     WaControl, WaScreen, WaScreenPhase, arbitrate,
 };
 pub use event::{CallSummary, CallUpdate, EventEnvelope, GatewayEvent};
+pub use group::{
+    CommunityRef, CreateGroup, GroupAction, GroupActionDone, GroupActionError, GroupActionKind,
+    GroupCreated, GroupJoined, InviteCode, InvitePreview, JoinGroup, JoinRequest,
+    MAX_GROUP_PARTICIPANTS, MAX_GROUP_PICTURE_BYTES, ParticipantResult, Subgroup,
+};
 pub use history::{SnapshotPlan, WaCallHistory, WaCallRecord, plan_snapshot, tracked_end};
 pub use identity::{IdentityMapping, IdentityMappings, IdentitySource};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};

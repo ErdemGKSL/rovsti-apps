@@ -361,6 +361,41 @@ pub async fn handle(sink: &EventSink, resolver: &Resolver, event: &Event) {
             .await;
         }
         Event::PictureUpdate(u) => {
+            // A group's picture changed: a line in the chat (E6-WA R6).
+            if u.jid.server == Server::Group {
+                let at_ms = u.timestamp.timestamp_millis();
+                let by = u.author.as_ref().map(|a| a.to_non_ad());
+                let by = match by {
+                    Some(author) => Some(chat_of(resolver, &author).await),
+                    None => None,
+                };
+                let own = resolver
+                    .client()
+                    .persistence_manager()
+                    .get_device_snapshot();
+                let mine = u.author.as_ref().is_some_and(|a| {
+                    [own.pn.as_ref(), own.lid.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|o| o.user == a.user && o.server == a.server)
+                });
+                let note = rosty_wa_proto::SystemNote::Group {
+                    action: "picture".to_owned(),
+                    by: if mine {
+                        Some(rosty_wa_proto::DELETED_BY_ME.to_owned())
+                    } else {
+                        by
+                    },
+                    participants: Vec::new(),
+                    value: u.removed.then(|| "removed".to_owned()),
+                };
+                let id = format!(
+                    "GPIC-{}-{at_ms}",
+                    u.picture_id.as_deref().unwrap_or("removed")
+                );
+                sink.group_note(u.jid.to_non_ad().to_string(), id, at_ms, note)
+                    .await;
+            }
             let change = match (u.removed, &u.picture_id) {
                 (true, _) => ProfileChange::Picture(None),
                 (false, Some(id)) if !id.is_empty() => ProfileChange::Picture(Some(id.clone())),

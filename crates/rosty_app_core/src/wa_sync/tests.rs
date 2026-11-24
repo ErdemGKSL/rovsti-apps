@@ -1891,6 +1891,8 @@ fn a_new_file_gets_the_whole_schema() {
             "alias",
             "chat_sync",
             "chats",
+            "group_members",
+            "groups",
             "media",
             "merge_log",
             "messages",

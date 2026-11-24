@@ -2,6 +2,36 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R6 (2026-11-20): groups
+
+Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r6.md`. Group info page from the thread header (subject,
+description, picture, creation, community and its groups, my role, timer, members in pages with roles), admin actions
+(add with per-person results and WhatsApp's invite for privacy refusals, remove, promote, demote, subject,
+description, picture, only admins send, only admins edit info, approve new members, join requests, invite link with
+copy, share and reset), New Group and Join Group with Link (paste or tap a `chat.whatsapp.com` link, preview first),
+leave with the last-admin warning, group notice lines in the thread, the announcement-mode and left composer lines.
+
+**Gateway commit to deploy**: `d6ebd16c` (group routes, notice lines, schema **v13**: `chat_settings.left_ms`). Back up
+the gateway database first (`sqlite3 gateway.db ".backup gateway-v12.db"`). The wire is additive; an older gateway
+answers the group routes with not found and the app says the gateway must be updated. Device store: `wa_sync` **v8**
+(tables `groups`, `group_members`).
+
+Try on a device: open a group's header, add a member whose privacy refuses adds and send the invite, promote and
+demote, toggle "Only Admins Can Send" and watch the other phone's composer, reset the link and try the old one, join
+with a link of a group that needs approval, leave as the only admin, get removed by another phone while the page is
+open, open a community's announcement group as a member.
+
+## E6-WA R5 follow-ups (2026-11-20, owner decisions, done in R6 step 1)
+
+- Place-card map tiles: a small bounded disk cache (the `rosty_tiles` LRU cache, 20 MiB, `cacheDir/wa-place-tiles`)
+  instead of memory only, deleted when the WhatsApp data is forgotten, unlinked or wiped. Trade-off noted in
+  `docs/architecture.md` (vault section). The `CLAUDE.md` line "keeps them in memory only" is left for the owner to
+  change (an agent does not edit `CLAUDE.md`); suggested wording: "keeps them in a small bounded cache (20 MiB in
+  `cacheDir`, deleted on unlink, forget and wipe)".
+- Tile server: Messages keeps the default VersaTiles server; no setting of its own and no sharing of Stops' choice.
+  Follow-up only if the owner asks again.
+- Location permission: unchanged (asked only when sending a place; precise asked, approximate accepted).
+
 ## E6-WA R5 (2026-11-19): rich content and presence
 
 Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r5.md`. Polls (show, vote, change, create), shared places (map

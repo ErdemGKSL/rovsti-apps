@@ -87,6 +87,8 @@ impl From<DriverError> for HttpError {
                 log::error!("driver: {msg}");
                 Self::new(ErrorCode::Internal, "WhatsApp request failed")
             }
+            DriverError::Refused(msg) => Self::new(ErrorCode::Conflict, msg),
+            DriverError::NotFound(msg) => Self::not_found(msg),
             DriverError::RateLimited { retry_after_s } => Self(ApiError::rate_limited(
                 "WhatsApp rate limit reached",
                 retry_after_s.map(|s| u64::from(s) * 1000),

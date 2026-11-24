@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.disabled
@@ -75,6 +76,12 @@ import dev.rosty.design.press.HoldResult
 import dev.rosty.design.press.awaitHold
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
+
+/** Test tags of the two parts of every [IosToggle]; the `:testing` probe `toggleThumbProbe` measures them. */
+object IosToggleTags {
+    const val Track = "ios-toggle-track"
+    const val Thumb = "ios-toggle-thumb"
+}
 
 /** Size of the switch track (Kyant0 LiquidToggle: 64 x 28). */
 private val TrackWidth = 64.dp
@@ -278,6 +285,7 @@ private fun IosSwitch(
                     .layerBackdrop(trackBackdrop)
                     .clip(RoundedCornerShape(percent = 50))
                     .drawBehind { drawRect(lerp(trackColor, onColor, damped.value)) }
+                    .testTag(IosToggleTags.Track)
                     .size(TrackWidth, TrackHeight),
             )
             Box(
@@ -327,7 +335,8 @@ private fun IosSwitch(
                             drawRect(Color.White.copy(alpha = 1f - progress))
                         },
                         debugTag = "toggle.thumb",
-                    ).size(40f.dp, 24f.dp),
+                    ).testTag(IosToggleTags.Thumb)
+                    .size(40f.dp, 24f.dp),
             )
         }
     }
